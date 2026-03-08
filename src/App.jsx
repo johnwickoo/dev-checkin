@@ -7,7 +7,6 @@ import './App.css'
 const EMAILJS_SERVICE_ID       = import.meta.env.VITE_EMAILJS_SERVICE_ID
 const EMAILJS_TEMPLATE_ID      = import.meta.env.VITE_EMAILJS_TEMPLATE_ID
 const EMAILJS_SHAME_TEMPLATE   = import.meta.env.VITE_EMAILJS_SHAME_TEMPLATE
-const EMAILJS_TASK_TEMPLATE    = import.meta.env.VITE_EMAILJS_TASK_TEMPLATE
 const EMAILJS_PUBLIC_KEY       = import.meta.env.VITE_EMAILJS_PUBLIC_KEY
 
 // ── Voting base URL ─────────────────────────────────────────
@@ -189,13 +188,6 @@ async function checkVoteVerdicts() {
           accept_count: accepts,
           reject_count: rejects,
           total_votes: votes.length,
-        }, EMAILJS_PUBLIC_KEY)
-
-        // Send task request email
-        await emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TASK_TEMPLATE, {
-          to_emails: ACCOUNTABILITY_EMAILS.join(','),
-          missed_date: formatDate(date),
-          excuse_text: excuse,
         }, EMAILJS_PUBLIC_KEY)
 
         entry.shameEmailSent = true
