@@ -1,6 +1,18 @@
 import { useState, useEffect } from 'react'
 import { supabase } from './supabase.js'
 
+const REJECT_PUNISHMENT_OPTIONS = [
+  { value: 'deep_work_2h', label: '2h deep work block' },
+  { value: 'no_social_24h', label: 'No social media for 24h' },
+  { value: 'donate_20', label: 'Donate $20' },
+]
+
+const PUNISHMENT_LABELS = {
+  deep_work_2h: '2h deep work block',
+  no_social_24h: 'No social media for 24h',
+  donate_20: 'Donate $20',
+}
+
 function VotePage() {
   const params = new URLSearchParams(window.location.search || window.location.hash.replace('#/vote', '').replace('?', ''))
   const voteToken = params.get('token') || ''
@@ -9,6 +21,8 @@ function VotePage() {
   const [status, setStatus] = useState('loading')
   const [submitting, setSubmitting] = useState(false)
   const [existingVote, setExistingVote] = useState(null)
+  const [selectedPunishment, setSelectedPunishment] = useState(null)
+  const [rejectPunishment, setRejectPunishment] = useState(REJECT_PUNISHMENT_OPTIONS[0].value)
   const [missedDate, setMissedDate] = useState('')
   const [excuseText, setExcuseText] = useState('')
   const [autoVoteDone, setAutoVoteDone] = useState(false)
@@ -65,9 +79,11 @@ function VotePage() {
 
     if (row.status === 'voted') {
       setExistingVote(row.vote || vote)
+      setSelectedPunishment(row.selected_punishment || null)
       setStatus('voted')
     } else if (row.status === 'already_voted') {
       setExistingVote(row.vote || existingVote || vote)
+      setSelectedPunishment(row.selected_punishment || null)
       setStatus('already_voted')
     } else if (row.status === 'expired') {
       setStatus('expired')
@@ -93,8 +109,11 @@ function VotePage() {
     if (status !== 'ready') return
     if (requestedVote !== 'accept' && requestedVote !== 'reject') return
     setAutoVoteDone(true)
-    castVote(requestedVote)
-  }, [autoVoteDone, status, requestedVote])
+    const votePayload = requestedVote === 'reject'
+      ? `reject:${rejectPunishment}`
+      : requestedVote
+    castVote(votePayload)
+  }, [autoVoteDone, status, requestedVote, rejectPunishment])
 
   return (
     <div className="app">
@@ -138,6 +157,18 @@ function VotePage() {
         <section className="card">
           <h2>Cast Your Vote</h2>
           <p className="vote-prompt">Is this excuse acceptable?</p>
+          <div className="vote-punishment">
+            <p className="vote-prompt">If rejecting, pick punishment:</p>
+            <select
+              className="field-input"
+              value={rejectPunishment}
+              onChange={e => setRejectPunishment(e.target.value)}
+            >
+              {REJECT_PUNISHMENT_OPTIONS.map(option => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          </div>
           <div className="vote-buttons">
             <button
               className="vote-btn vote-accept"
@@ -148,7 +179,7 @@ function VotePage() {
             </button>
             <button
               className="vote-btn vote-reject"
-              onClick={() => castVote('reject')}
+              onClick={() => castVote(`reject:${rejectPunishment}`)}
               disabled={submitting}
             >
               {submitting ? '...' : 'Reject'}
@@ -167,6 +198,11 @@ function VotePage() {
           </p>
           {status === 'voted' && (
             <p className="vote-sub">Thanks for holding them accountable.</p>
+          )}
+          {existingVote === 'reject' && selectedPunishment && (
+            <p className="vote-sub">
+              Selected punishment: <strong>{PUNISHMENT_LABELS[selectedPunishment] || selectedPunishment}</strong>
+            </p>
           )}
         </section>
       )}

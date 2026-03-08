@@ -21,6 +21,11 @@ const VERIFICATION_LABELS = {
   failed: 'Failed',
   challenged: 'Challenged',
 }
+const PUNISHMENT_LABELS = {
+  deep_work_2h: 'Do a focused 2-hour deep work block and share proof',
+  no_social_24h: 'No social media for 24 hours',
+  donate_20: 'Donate $20 and share receipt',
+}
 
 function toDateKey(date) {
   const y = date.getFullYear()
@@ -63,6 +68,15 @@ function formatShortDate(dateStr) {
 
 function formatGoalDeadlineLabel(goalTitle, deadline) {
   return `Missed goal deadline: "${goalTitle}" (due ${formatDate(deadline)})`
+}
+
+function getMajorityVoteThreshold(partnerCount) {
+  const count = Math.max(Number(partnerCount) || 0, 1)
+  return Math.floor(count / 2) + 1
+}
+
+function formatPunishmentChoice(choice) {
+  return PUNISHMENT_LABELS[choice] || PUNISHMENT_LABELS.deep_work_2h
 }
 
 function toIsoInHours(hours) {
@@ -698,6 +712,8 @@ function App({ userId }) {
           date: missed.deadline,
           excuse: `${formatGoalDeadlineLabel(goalTitle, missed.deadline)} — ${missed.excuse}${requestedExtensionText}`,
           voteCount: { accepts: missed.vote_accepts, rejects: missed.vote_rejects },
+          punishmentChoice: missed.selected_punishment,
+          punishmentChoiceVotes: missed.selected_punishment_votes || 0,
         })
         return true
       }
@@ -729,6 +745,8 @@ function App({ userId }) {
           date: missed.date,
           excuse: missed.excuse,
           voteCount: { accepts: missed.vote_accepts, rejects: missed.vote_rejects },
+          punishmentChoice: missed.selected_punishment,
+          punishmentChoiceVotes: missed.selected_punishment_votes || 0,
         })
         return true
       }
@@ -751,7 +769,7 @@ function App({ userId }) {
         date: m.date,
         excuse: m.excuse,
         excuseId: m.excuse_id,
-        requiredVotes: m.required_votes || Math.max(Math.ceil((m.partner_count_snapshot || currentPartnerEmails.length) / 2), 2),
+        requiredVotes: m.required_votes || getMajorityVoteThreshold(m.partner_count_snapshot || currentPartnerEmails.length),
         partnerCountSnapshot: m.partner_count_snapshot || currentPartnerEmails.length,
       }))
 
@@ -766,7 +784,7 @@ function App({ userId }) {
           date: m.deadline,
           excuse: `${formatGoalDeadlineLabel(goalTitle, m.deadline)} — ${m.excuse}${requestedExtensionText}`,
           excuseId: m.excuse_id,
-          requiredVotes: m.required_votes || Math.max(Math.ceil((m.partner_count_snapshot || currentPartnerEmails.length) / 2), 2),
+          requiredVotes: m.required_votes || getMajorityVoteThreshold(m.partner_count_snapshot || currentPartnerEmails.length),
           partnerCountSnapshot: m.partner_count_snapshot || currentPartnerEmails.length,
         }
       })
@@ -1013,7 +1031,7 @@ function App({ userId }) {
 
     const generatedExcuseId = `${missedDate}-${Date.now()}`
     const partnerCountSnapshot = partners.length
-    const requiredVotes = Math.max(Math.ceil(partnerCountSnapshot / 2), 2)
+    const requiredVotes = getMajorityVoteThreshold(partnerCountSnapshot)
 
     const { data: existingMissedRow, error: existingMissedErr } = await supabase
       .from('missed_days')
@@ -1161,7 +1179,7 @@ function App({ userId }) {
 
     const generatedExcuseId = `${deadlineIssue.goalId}-${deadlineIssue.deadline}-${Date.now()}`
     const partnerCountSnapshot = partners.length
-    const requiredVotes = Math.max(Math.ceil(partnerCountSnapshot / 2), 2)
+    const requiredVotes = getMajorityVoteThreshold(partnerCountSnapshot)
 
     const { data: existingDeadlineRow, error: existingDeadlineErr } = await supabase
       .from('missed_goal_deadlines')
@@ -1418,7 +1436,10 @@ function App({ userId }) {
           <div className="punishment-message">
             <p>Your excuse was rejected by the group.</p>
             <p>Your partners have been notified.</p>
-            <p>You owe a task — check your email.</p>
+            <p><strong>Assigned punishment:</strong> {formatPunishmentChoice(punishment.punishmentChoice)}</p>
+            {punishment.punishmentChoiceVotes > 0 && (
+              <p>This punishment won with {punishment.punishmentChoiceVotes} reject vote(s).</p>
+            )}
           </div>
           <div className="punishment-gate">
             <p className="punishment-instruction">Type <strong>I will do better</strong> exactly to continue.</p>
