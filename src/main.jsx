@@ -9,6 +9,7 @@ import { supabase } from './supabase.js'
 const StatsPage = lazy(() => import('./StatsPage.jsx'))
 const SettingsPage = lazy(() => import('./SettingsPage.jsx'))
 const VotePage = lazy(() => import('./VotePage.jsx'))
+const PunishPage = lazy(() => import('./PunishPage.jsx'))
 const THEME_STORAGE_KEY = 'ui_theme_mode'
 
 function toDateKey(date) {
@@ -60,7 +61,7 @@ function LoginPage() {
   return (
     <div className="app">
       <header>
-        <h1>Daily Check-in</h1>
+        <h1>Accountabuddy</h1>
         <p className="date">{mode === 'login' ? 'Sign in to continue' : 'Create your account'}</p>
       </header>
       <section className="card">
@@ -108,9 +109,9 @@ function checkNotificationReminder(userId) {
   if (lastNotified === today) return
 
   localStorage.setItem(`last_notified_${userId}`, today)
-  new Notification('Daily Check-in Reminder', {
+  new Notification('Accountabuddy Reminder', {
     body: "Don't forget to log your check-in today!",
-    icon: '/vite.svg',
+    icon: '/accountabuddy-icon.svg',
   })
 }
 
@@ -170,7 +171,7 @@ function Main() {
   if (session === undefined || (session && setupDone === undefined)) {
     return (
       <div className="app">
-        <header><h1>Daily Check-in</h1></header>
+        <header><h1>Accountabuddy</h1></header>
         <section className="card"><p className="vote-status">Loading...</p></section>
       </div>
     )
@@ -228,6 +229,7 @@ function Router() {
   useEffect(() => { applyTheme(getPreferredTheme()) }, [])
   const path = window.location.pathname
   if (path === '/vote') return <Suspense fallback={<LoadingFallback />}><VotePage /></Suspense>
+  if (path === '/punish') return <Suspense fallback={<LoadingFallback />}><PunishPage /></Suspense>
   return <Main />
 }
 

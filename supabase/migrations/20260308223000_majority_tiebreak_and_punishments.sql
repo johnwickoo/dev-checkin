@@ -281,6 +281,7 @@ language plpgsql
 security definer
 set search_path = public, extensions
 as $$
+#variable_conflict use_column
 declare
   v_hash text;
   v_vote_input text;
@@ -372,7 +373,7 @@ begin
     v_invite.excuse_text,
     case when v_vote_normalized = 'reject' then v_punishment_choice else null end
   )
-  on conflict (excuse_id, voter_email)
+  on conflict on constraint excuse_votes_excuse_id_voter_email_key
   do nothing;
 
   update excuse_vote_invites

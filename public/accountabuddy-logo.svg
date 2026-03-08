@@ -1,0 +1,40 @@
+<svg width="1500" height="420" viewBox="0 0 1500 420" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="lbg" x1="18" y1="18" x2="326" y2="326" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0E7490"/>
+      <stop offset="0.55" stop-color="#0F766E"/>
+      <stop offset="1" stop-color="#134E4A"/>
+    </linearGradient>
+    <linearGradient id="lcheck" x1="130" y1="176" x2="238" y2="240" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#A7F3D0"/>
+      <stop offset="1" stop-color="#34D399"/>
+    </linearGradient>
+    <linearGradient id="ltxt" x1="375" y1="110" x2="1280" y2="290" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#14B8A6"/>
+      <stop offset="1" stop-color="#0E7490"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="18" y="18" width="308" height="308" rx="76" fill="url(#lbg)"/>
+  <circle cx="172" cy="172" r="108" fill="white" opacity="0.08"/>
+
+  <path
+    d="M172 74L232 100V156C232 208 199 248 172 264C145 248 112 208 112 156V100L172 74Z"
+    fill="white"
+    fill-opacity="0.15"
+    stroke="white"
+    stroke-opacity="0.28"
+    stroke-width="8"
+    stroke-linejoin="round"
+  />
+
+  <circle cx="150" cy="138" r="13" fill="white" fill-opacity="0.95"/>
+  <circle cx="194" cy="138" r="13" fill="white" fill-opacity="0.95"/>
+  <path d="M133 165C139 154 164 154 170 165" stroke="white" stroke-opacity="0.95" stroke-width="8" stroke-linecap="round"/>
+  <path d="M177 165C183 154 208 154 214 165" stroke="white" stroke-opacity="0.95" stroke-width="8" stroke-linecap="round"/>
+
+  <path d="M132 198L162 228L216 174" stroke="url(#lcheck)" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <text x="372" y="190" fill="url(#ltxt)" font-family="Avenir Next, Nunito, Montserrat, Poppins, system-ui, sans-serif" font-size="122" font-weight="800" letter-spacing="0.2">Accountabuddy</text>
+  <text x="377" y="252" fill="#94A3B8" font-family="Nunito, Avenir Next, system-ui, sans-serif" font-size="39" font-weight="700" letter-spacing="0.5">Daily accountability, powered by your people</text>
+</svg>

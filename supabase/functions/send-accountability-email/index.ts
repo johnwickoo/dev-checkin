@@ -26,6 +26,81 @@ function getRequiredEnv(name: string): string {
   return value
 }
 
+function trimSlash(url: string): string {
+  return url.replace(/\/+$/, '')
+}
+
+function detectAppBaseUrl(req: Request, messages: EmailPayload[]): string | null {
+  const configured = String(Deno.env.get('APP_PUBLIC_URL') || '').trim()
+  if (configured) return trimSlash(configured)
+
+  const firstVoteLink = String(messages.find(m => typeof m?.vote_link === 'string')?.vote_link || '').trim()
+  if (firstVoteLink) {
+    try {
+      return trimSlash(new URL(firstVoteLink).origin)
+    } catch {
+      // Fall through to headers below.
+    }
+  }
+
+  const originHeader = String(req.headers.get('origin') || '').trim()
+  if (originHeader) return trimSlash(originHeader)
+
+  const refererHeader = String(req.headers.get('referer') || '').trim()
+  if (refererHeader) {
+    try {
+      return trimSlash(new URL(refererHeader).origin)
+    } catch {
+      return null
+    }
+  }
+
+  return null
+}
+
+function toFiniteNumber(value: unknown): number | null {
+  if (value === null || value === undefined || value === '') return null
+  const n = Number(value)
+  return Number.isFinite(n) ? n : null
+}
+
+function normalizeTemplateParams(
+  msg: EmailPayload,
+  mode: EmailMode,
+  fallbackPunishLink: string | null,
+): EmailPayload {
+  const normalized: EmailPayload = { ...msg }
+
+  const excuse = String(msg.excuse ?? msg.excuse_text ?? '').trim()
+  if (excuse) {
+    normalized.excuse = excuse
+    normalized.excuse_text = excuse
+  }
+
+  const rejectCount = toFiniteNumber(msg.reject_count) ?? toFiniteNumber(msg.vote_rejects) ?? 0
+  normalized.reject_count = rejectCount
+
+  let acceptCount = toFiniteNumber(msg.accept_count) ?? toFiniteNumber(msg.vote_accepts)
+  if (acceptCount === null) {
+    const totalVotes = toFiniteNumber(msg.total_votes) ?? toFiniteNumber(msg.vote_total)
+    if (totalVotes !== null) acceptCount = Math.max(totalVotes - rejectCount, 0)
+  }
+  if (acceptCount !== null) normalized.accept_count = acceptCount
+
+  if (!normalized.from_name) normalized.from_name = 'Accountabuddy user'
+
+  if (mode === 'shame' && !normalized.punishment) {
+    const punishment = String(msg.punishment ?? msg.selected_punishment ?? '').trim()
+    if (punishment) normalized.punishment = punishment
+  }
+
+  if (fallbackPunishLink && !normalized.punish_link) {
+    normalized.punish_link = fallbackPunishLink
+  }
+
+  return normalized
+}
+
 async function sendViaEmailJs(
   serviceId: string,
   templateId: string,
@@ -118,6 +193,10 @@ serve(async req => {
     const privateKey = Deno.env.get('EMAILJS_PRIVATE_KEY')
 
     const templateId = mode === 'vote' ? voteTemplate : shameTemplate
+    const appBaseUrl = detectAppBaseUrl(req, messages)
+    const punishmentSuggestLink = appBaseUrl
+      ? `${appBaseUrl}/punish?for=${authData.user.id}`
+      : null
 
     let sent = 0
     const failures: Array<{ to_email: string; error: string }> = []
@@ -128,7 +207,9 @@ serve(async req => {
         failures.push({ to_email: '', error: 'Missing to_email' })
         continue
       }
-      const result = await sendViaEmailJs(serviceId, templateId, publicKey, privateKey, msg)
+      // Hardening + compatibility: enforce server-side punish link and normalize template variable names.
+      const safeMsg = normalizeTemplateParams(msg, mode, punishmentSuggestLink)
+      const result = await sendViaEmailJs(serviceId, templateId, publicKey, privateKey, safeMsg)
       if (result.ok) {
         sent += 1
       } else {

@@ -97,8 +97,10 @@ function StatsPage({ userId }) {
     const avgGoalCompletion = getAverageCompletionPct(dailyQuality)
     const avgVerifiedCompletion = getAverageCompletionPct(verifiedDailyQuality)
 
-    // Rest days
-    const restDays = JSON.parse(localStorage.getItem(`rest_days_${userId}`) || '[]')
+    // Rest days (server-side)
+    const { data: settingsRow } = await supabase.from('user_settings')
+      .select('rest_days').eq('user_id', userId).maybeSingle()
+    const restDays = settingsRow?.rest_days || []
 
     // Streaks (rest-day aware)
     const deadlinePenaltyDates = new Set(
@@ -222,12 +224,16 @@ function StatsPage({ userId }) {
     for (const g of goals) goalTitleById[g.id] = g.title
 
     const missedEntries = missed.map(m => ({
+      id: m.id,
+      sourceType: 'missed_day',
       date: m.date,
       excuse: m.excuse,
       verdict: m.verdict || 'pending',
       voteCount: m.vote_total > 0 ? { accepts: m.vote_accepts, rejects: m.vote_rejects } : null,
     }))
     const deadlineEntries = deadlineMisses.map(m => ({
+      id: m.id,
+      sourceType: 'deadline',
       date: m.deadline,
       excuse: `${formatGoalDeadlineLabel(goalTitleById[m.goal_id] || 'Goal', m.deadline)} — ${m.excuse}${m.requested_deadline ? ` Requested extension to ${formatDate(m.requested_deadline)}.` : ''}`,
       verdict: m.verdict || 'pending',
@@ -406,7 +412,7 @@ function StatsPage({ userId }) {
             ) : (
               <div className="missed-list">
                 {stats.missedEntries.map(entry => (
-                  <div key={entry.date} className="missed-row">
+                  <div key={`${entry.sourceType}-${entry.id}`} className="missed-row">
                     <div className="missed-row-header">
                       <span className="missed-row-date">{formatDate(entry.date)}</span>
                       <span className={`history-badge ${

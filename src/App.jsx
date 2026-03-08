@@ -6,7 +6,6 @@ import {
   getVerificationStatus,
   buildDailyGoalQuality,
   getQualifiedDateSet,
-  getAverageCompletionPct,
   getLatestDate,
   getConsecutiveStreakFromDate,
 } from './streakUtils.js'
@@ -285,6 +284,10 @@ function App({ userId }) {
   const [punishment, setPunishment] = useState(null)
   const [punishmentInput, setPunishmentInput] = useState('')
 
+  // Punishment tasks (assigned daily tasks from rejected excuses)
+  const [punishmentTasks, setPunishmentTasks] = useState([])
+  const [punishmentTaskProof, setPunishmentTaskProof] = useState({})
+
   // UI
   const [saveStatus, setSaveStatus] = useState('idle') // idle | saving | saved | error
   const [loading, setLoading] = useState(true)
@@ -293,11 +296,10 @@ function App({ userId }) {
   const [history, setHistory] = useState([])
   const [historyPage, setHistoryPage] = useState(0)
   const [historyHasMore, setHistoryHasMore] = useState(true)
+  const [restDaysState, setRestDaysState] = useState([])
   const [streak, setStreak] = useState(0)
   const [verifiedStreak, setVerifiedStreak] = useState(0)
   const [streakPaused, setStreakPaused] = useState(false)
-  const [completionAvgPct, setCompletionAvgPct] = useState(0)
-  const [verifiedAvgPct, setVerifiedAvgPct] = useState(0)
   const [last30, setLast30] = useState([])
   const [collapsed, setCollapsed] = useState({
     dots: true,
@@ -307,7 +309,6 @@ function App({ userId }) {
     built: false,
     goals: false,
   })
-  const [showHeaderDetails, setShowHeaderDetails] = useState(false)
   const [postSubmitUiApplied, setPostSubmitUiApplied] = useState(false)
   const [isOnline, setIsOnline] = useState(navigator.onLine)
 
@@ -393,13 +394,14 @@ function App({ userId }) {
     setLoading(true)
     if (navigator.onLine) await flushOfflineQueue()
 
-    const [goalsRes, partnersRes, checkinRes, checkinDatesRes, missedRes, deadlineMissRes] = await Promise.all([
+    const [goalsRes, partnersRes, checkinRes, checkinDatesRes, missedRes, deadlineMissRes, settingsRes] = await Promise.all([
       supabase.from('goals').select('*').eq('user_id', userId).eq('active', true).order('created_at'),
       supabase.from('accountability_partners').select('*').eq('user_id', userId),
       supabase.from('checkins').select('*').eq('user_id', userId).eq('date', today).maybeSingle(),
       supabase.from('checkins').select('date').eq('user_id', userId).lt('date', today).order('date', { ascending: true }),
       supabase.from('missed_days').select('*').eq('user_id', userId).order('date', { ascending: false }),
       supabase.from('missed_goal_deadlines').select('*').eq('user_id', userId).order('deadline', { ascending: false }),
+      supabase.from('user_settings').select('rest_days').eq('user_id', userId).maybeSingle(),
     ])
 
     const userGoals = goalsRes.data || []
@@ -484,8 +486,9 @@ function App({ userId }) {
       setGoalProgress(progress)
     }
 
-    // Check rest days
-    const restDays = JSON.parse(localStorage.getItem(`rest_days_${userId}`) || '[]')
+    // Check rest days (server-side)
+    const restDays = settingsRes.data?.rest_days || []
+    setRestDaysState(restDays)
     const checkinDateSet = new Set((checkinDatesRes.data || []).map(c => c.date))
     const missedDays = missedRes.data || []
     const deadlineMisses = deadlineMissRes.data || []
@@ -576,6 +579,15 @@ function App({ userId }) {
       setDeadlineSending(false)
     }
 
+    // Load active punishment tasks
+    const { data: pTasks } = await supabase.from('punishment_tasks')
+      .select('*').eq('user_id', userId).eq('completed', false)
+      .order('due_date', { ascending: true })
+    setPunishmentTasks(pTasks || [])
+    const proofState = {}
+    for (const t of (pTasks || [])) proofState[t.id] = t.proof_url || ''
+    setPunishmentTaskProof(proofState)
+
     await loadPendingVotes(missedDays, deadlineMisses, userPartners, userGoals)
     await loadStreakAndDots(userGoals.length)
     setLoading(false)
@@ -610,10 +622,6 @@ function App({ userId }) {
     )
     const qualifiedDates = getQualifiedDateSet(dailyQuality)
     const verifiedQualifiedDates = getQualifiedDateSet(verifiedDailyQuality)
-    const recentQualityFrom = dateOffset(today, -29)
-    setCompletionAvgPct(getAverageCompletionPct(dailyQuality, recentQualityFrom))
-    setVerifiedAvgPct(getAverageCompletionPct(verifiedDailyQuality, recentQualityFrom))
-
     const checkinMap = {}
     for (const c of checkins) checkinMap[c.date] = c.mood
     const missedDates = new Set((missedRes.data || []).map(m => m.date))
@@ -625,7 +633,7 @@ function App({ userId }) {
     for (const d of deadlinePenaltyDates) missedDates.add(d)
 
     // Streak (rest days don't break streaks, partial check-ins don't count)
-    const restDays = JSON.parse(localStorage.getItem(`rest_days_${userId}`) || '[]')
+    const restDays = restDaysState
     const noActiveGoals = activeGoalCount === 0
     setStreakPaused(noActiveGoals)
 
@@ -696,10 +704,14 @@ function App({ userId }) {
           const excuseText = `${formatGoalDeadlineLabel(goalTitle, missed.deadline)} — ${missed.excuse}${requestedExtensionText}`
           const messages = userPartners.map(p => ({
             to_email: p.email,
+            from_name: 'Accountabuddy user',
             missed_date: formatDate(missed.deadline),
+            excuse: excuseText,
             excuse_text: excuseText,
+            accept_count: missed.vote_accepts,
             reject_count: missed.vote_rejects,
             total_votes: missed.vote_total,
+            punishment: formatPunishmentChoice(missed.selected_punishment),
           }))
           await sendAccountabilityEmails({ mode: 'shame', messages })
           await supabase.from('missed_goal_deadlines').update({ shame_email_sent: true }).eq('id', missed.id)
@@ -729,10 +741,14 @@ function App({ userId }) {
         try {
           const messages = userPartners.map(p => ({
               to_email: p.email,
+              from_name: 'Accountabuddy user',
               missed_date: formatDate(missed.date),
+              excuse: missed.excuse,
               excuse_text: missed.excuse,
+              accept_count: missed.vote_accepts,
               reject_count: missed.vote_rejects,
               total_votes: missed.vote_total,
+              punishment: formatPunishmentChoice(missed.selected_punishment),
             }))
           await sendAccountabilityEmails({ mode: 'shame', messages })
           await supabase.from('missed_days').update({ shame_email_sent: true }).eq('id', missed.id)
@@ -980,14 +996,8 @@ function App({ userId }) {
   const failedTodayGoals = completedGoalEntries.filter(gp => getVerificationStatus(gp) === 'failed').length
   const challengedTodayGoals = completedGoalEntries.filter(gp => getVerificationStatus(gp) === 'challenged').length
   const auditTodayGoals = completedGoalEntries.filter(gp => gp.auditRequired).length
-  const dayCompletionRatio = goals.length > 0 ? completedGoalsWithProof / goals.length : 0
-  const dayCompletionPct = Math.round(dayCompletionRatio * 100)
-  const dayVerifiedRatio = goals.length > 0 ? verifiedTodayGoals / goals.length : 0
-  const dayVerifiedPct = Math.round(dayVerifiedRatio * 100)
   const hasFailedVerificationToday = failedTodayGoals > 0
-  const hasVerificationReviewNeededToday = pendingTodayGoals > 0 || challengedTodayGoals > 0 || failedTodayGoals > 0 || auditTodayGoals > 0
   const noActiveGoals = goals.length === 0
-  const meetsStreakThreshold = !noActiveGoals && dayCompletionRatio >= STREAK_MIN_COMPLETION_RATIO
   const isComplete = !noActiveGoals
     && learned.trim().length >= 50
     && built.trim().length > 0
@@ -1021,6 +1031,17 @@ function App({ userId }) {
     else await query.eq('date', punishment.date)
     setPunishment(null)
     setPunishmentInput('')
+  }
+
+  // ── Punishment task completion ───────────────────────────
+  async function completePunishmentTask(taskId) {
+    const proof = (punishmentTaskProof[taskId] || '').trim()
+    const { error: err } = await supabase.from('punishment_tasks')
+      .update({ completed: true, completed_at: new Date().toISOString(), proof_url: proof || null })
+      .eq('id', taskId)
+    if (err) { showToast(err.message, 'error'); return }
+    setPunishmentTasks(prev => prev.filter(t => t.id !== taskId))
+    showToast('Punishment task completed')
   }
 
   // ── Missed day submit ─────────────────────────────────────
@@ -1099,7 +1120,7 @@ function App({ userId }) {
         .in('checkin_id', checkinIds)
       const dailyQuality = buildDailyGoalQuality(recentCheckins, gpRows || [])
       const qualifiedDates = getQualifiedDateSet(dailyQuality)
-      const restDays = JSON.parse(localStorage.getItem(`rest_days_${userId}`) || '[]')
+      const restDays = restDaysState
       let d = dateOffset(missedDate, -1)
       while (true) {
         const dow = new Date(d).getDay()
@@ -1252,7 +1273,7 @@ function App({ userId }) {
         .in('checkin_id', checkinIds)
       const dailyQuality = buildDailyGoalQuality(recentCheckins, gpRows || [])
       const qualifiedDates = getQualifiedDateSet(dailyQuality)
-      const restDays = JSON.parse(localStorage.getItem(`rest_days_${userId}`) || '[]')
+      const restDays = restDaysState
       let d = dateOffset(deadlineIssue.deadline, -1)
       while (true) {
         const dow = new Date(d).getDay()
@@ -1398,7 +1419,6 @@ function App({ userId }) {
 
   // ── Derived ───────────────────────────────────────────────
   const dateDisplay = formatDate(today)
-  const streakThresholdPct = Math.round(STREAK_MIN_COMPLETION_RATIO * 100)
   const tomorrowDisplay = formatShortDate(dateOffset(today, 1))
 
   // ── Auto-save status label ────────────────────────────────
@@ -1412,7 +1432,7 @@ function App({ userId }) {
   if (loading) {
     return (
       <div className="app">
-        <header><h1>Daily Check-in</h1><p className="date">{dateDisplay}</p></header>
+        <header><h1>Accountabuddy</h1><p className="date">{dateDisplay}</p></header>
         <section className="card"><p className="vote-status">Loading...</p></section>
       </div>
     )
@@ -1421,9 +1441,12 @@ function App({ userId }) {
   // ── Punishment ────────────────────────────────────────────
   if (punishment) {
     const inputMatch = punishmentInput === 'I will do better'
+    const relatedTask = punishmentTasks.find(t => t.source_id === punishment.id && t.source_type === punishment.source)
+    const taskDone = !relatedTask // task either completed or doesn't exist yet
+    const canAcknowledge = inputMatch && taskDone
     return (
       <div className="app">
-        <header><h1>Daily Check-in</h1><p className="date">{dateDisplay}</p></header>
+        <header><h1>Accountabuddy</h1><p className="date">{dateDisplay}</p></header>
         <section className="card punishment-card">
           <h2>Excuse Rejected</h2>
           <p className="punishment-date">{formatDate(punishment.date)}</p>
@@ -1441,12 +1464,42 @@ function App({ userId }) {
               <p>This punishment won with {punishment.punishmentChoiceVotes} reject vote(s).</p>
             )}
           </div>
+
+          {relatedTask && (
+            <div className="punishment-task-inline">
+              <h3>Complete Your Punishment</h3>
+              <p className="punishment-task-desc">{relatedTask.description}</p>
+              <p className="punishment-task-due">
+                Due: {formatDate(relatedTask.due_date)}
+                {relatedTask.due_date < today ? ' (overdue)' : ''}
+              </p>
+              <input
+                type="text"
+                className="field-input"
+                placeholder="Proof URL (link to evidence)"
+                value={punishmentTaskProof[relatedTask.id] || ''}
+                onChange={e => setPunishmentTaskProof(prev => ({ ...prev, [relatedTask.id]: e.target.value }))}
+              />
+              <button className="save-btn" onClick={() => completePunishmentTask(relatedTask.id)}>
+                Mark Punishment as Done
+              </button>
+              <p className="punishment-task-note">Must wait at least 1 hour after assignment.</p>
+            </div>
+          )}
+
           <div className="punishment-gate">
-            <p className="punishment-instruction">Type <strong>I will do better</strong> exactly to continue.</p>
+            <p className="punishment-instruction">
+              {relatedTask
+                ? 'Complete the punishment task above first, then type "I will do better" to continue.'
+                : 'Type "I will do better" exactly to continue.'}
+            </p>
             <input type="text" className={`field-input punishment-input ${inputMatch ? 'punishment-match' : ''}`}
               value={punishmentInput} onChange={e => setPunishmentInput(e.target.value)}
-              placeholder="I will do better" spellCheck={false} autoComplete="off" />
-            <button className="save-btn" onClick={acknowledgePunishment} disabled={!inputMatch}>Acknowledge & Continue</button>
+              placeholder="I will do better" spellCheck={false} autoComplete="off"
+              disabled={!!relatedTask} />
+            <button className="save-btn" onClick={acknowledgePunishment} disabled={!canAcknowledge}>
+              {relatedTask ? 'Complete punishment first' : 'Acknowledge & Continue'}
+            </button>
           </div>
         </section>
       </div>
@@ -1460,7 +1513,7 @@ function App({ userId }) {
     const canSubmit = charCount >= 80 && deadlineAvoidable !== null && hasValidExtensionDate && !deadlineSending
     return (
       <div className="app">
-        <header><h1>Daily Check-in</h1><p className="date">{dateDisplay}</p></header>
+        <header><h1>Accountabuddy</h1><p className="date">{dateDisplay}</p></header>
         <section className="card missed-card">
           <h2>Missed Goal Deadline</h2>
           <p className="missed-date">{formatDate(deadlineIssue.deadline)}</p>
@@ -1507,7 +1560,7 @@ function App({ userId }) {
       : `You missed a check-in on this date. Write your excuse below before continuing with today's check-in. This will be emailed to ${partners.length} people who will vote on whether it's acceptable.`
     return (
       <div className="app">
-        <header><h1>Daily Check-in</h1><p className="date">{dateDisplay}</p></header>
+        <header><h1>Accountabuddy</h1><p className="date">{dateDisplay}</p></header>
         <section className="card missed-card">
           <h2>Missed Day</h2>
           <p className="missed-date">{formatDate(missedDate)}</p>
@@ -1537,103 +1590,77 @@ function App({ userId }) {
       {!isOnline && <div className="offline-bar">Offline — changes will sync when reconnected</div>}
 
       <header>
-        <h1>Daily Check-in</h1>
+        <h1>Accountabuddy</h1>
         <p className="date">{dateDisplay}</p>
         {streak > 0 && (
           <p className="streak">
             {streak} day streak
-            <span className="streak-verified"> ({verifiedStreak} verified)</span>
-            {streakPaused && <span className="streak-paused"> (paused)</span>}
+            {verifiedStreak !== streak && <span className="streak-verified"> ({verifiedStreak} verified)</span>}
+            {streakPaused && <span className="streak-paused"> paused</span>}
           </p>
         )}
-        {noActiveGoals ? (
-          <p className="streak-quality">
-            No active goals. Streak is paused until you add a new goal.
-          </p>
-        ) : (
-          <p className="streak-quality">
-            Today: {dayCompletionPct}% submitted / {dayVerifiedPct}% verified
-            {' '}({meetsStreakThreshold ? 'submission eligible' : `needs ${streakThresholdPct}% submitted`})
-          </p>
-        )}
-        {!noActiveGoals && (
-          <>
-            <button className="header-detail-toggle" onClick={() => setShowHeaderDetails(v => !v)}>
-              {showHeaderDetails ? 'Hide quality details' : 'Show quality details'}
-            </button>
-            {showHeaderDetails && (
-              <p className="streak-quality streak-quality-sub">
-                Last 30 days: {completionAvgPct}% submitted / {verifiedAvgPct}% verified
-              </p>
-            )}
-          </>
+        {noActiveGoals && (
+          <p className="streak-quality">No active goals — streak paused. Add one in Settings.</p>
         )}
       </header>
 
-      {/* Auto-save indicator */}
-      <div className={`autosave-indicator autosave-${saveStatus}`}>{saveLabel}</div>
-
-      {noActiveGoals && (
-        <section className="card goal-cycle-card">
-          <h2>Goal Cycle Complete</h2>
-          <p className="goal-cycle-text">
-            You have no active goals right now. Add your next goal in Settings to resume streak progression.
-          </p>
-          {streak > 0 && (
-            <p className="goal-cycle-sub">Current streak is paused at {streak} day{streak === 1 ? '' : 's'}.</p>
-          )}
-        </section>
+      {/* Auto-save indicator — only show when actively saving or just saved */}
+      {saveStatus !== 'idle' && (
+        <div className={`autosave-indicator autosave-${saveStatus}`}>{saveLabel}</div>
       )}
 
       {doneForToday && (
         <section className="card day-done-card">
           <h2>All Set For Today</h2>
-          <p className="day-done-text">Everything is submitted. Nothing left to do until tomorrow ({tomorrowDisplay}).</p>
+          <p className="day-done-text">Nothing left to do until tomorrow ({tomorrowDisplay}).</p>
           <p className="day-done-sub">
-            Verification: {verifiedTodayGoals} verified, {pendingTodayGoals} pending
-            {auditTodayGoals > 0 ? `, ${auditTodayGoals} audit` : ''}
+            {completedGoalsWithProof}/{goals.length} goals
+            {pendingTodayGoals > 0 && ` — ${pendingTodayGoals} pending verification`}
+            {auditTodayGoals > 0 && ` — ${auditTodayGoals} in audit`}
           </p>
-          <button className="history-toggle day-done-edit" onClick={openEditSections}>Edit Today&apos;s Check-in</button>
+          <button className="history-toggle day-done-edit" onClick={openEditSections}>Edit today</button>
         </section>
       )}
 
-      {completedGoalEntries.length > 0 && hasVerificationReviewNeededToday && (
-        <section className="card verification-summary-card">
-          <h2>Proof Verification</h2>
-          <p className="verification-summary-line">
-            {verifiedTodayGoals} verified | {pendingTodayGoals} pending | {challengedTodayGoals} challenged | {failedTodayGoals} failed
+      {noActiveGoals && !doneForToday && (
+        <section className="card goal-cycle-card">
+          <h2>Goal Cycle Complete</h2>
+          <p className="goal-cycle-text">
+            Add your next goal in Settings to resume streak progression.
           </p>
-          {auditTodayGoals > 0 && (
-            <p className="verification-summary-sub">Random weekly audit queue: {auditTodayGoals} goal(s)</p>
+          {streak > 0 && (
+            <p className="goal-cycle-sub">Streak paused at {streak} day{streak === 1 ? '' : 's'}.</p>
           )}
         </section>
       )}
 
-      {/* 30-Day Dots */}
-      <section className="card">
-        <h2 className="card-header" onClick={() => toggleCollapse('dots')}>
-          Last 30 Days {collapsed.dots ? '+' : ''}
-        </h2>
-        {!collapsed.dots && (<>
-          <div className="dot-grid">
-            {last30.map(({ date, status, moodLevel }) => (
-              <div key={date}
-                className={`dot ${status === 'completed' ? (moodLevel >= 4 ? 'dot-mood-high' : moodLevel === 3 ? 'dot-mood-mid' : moodLevel >= 1 ? 'dot-mood-low' : 'dot-completed') : `dot-${status}`}`}
-                title={`${formatShortDate(date)}: ${status}${moodLevel ? ` (mood ${moodLevel})` : ''}`} />
+      {/* Punishment tasks — first if present, this is urgent */}
+      {punishmentTasks.length > 0 && (
+        <section className="card card-accent-red">
+          <h2>Punishment Tasks ({punishmentTasks.length})</h2>
+          <p className="subtitle">Complete these before your next check-in counts.</p>
+          <div className="blocks">
+            {punishmentTasks.map(task => (
+              <div key={task.id} className="punishment-task-block">
+                <p className="punishment-task-desc">{task.description}</p>
+                <p className="punishment-task-due">Due: {formatDate(task.due_date)}{task.due_date < today ? ' (overdue)' : ''}</p>
+                <input
+                  type="text"
+                  className="field-input"
+                  placeholder="Proof URL (link to evidence)"
+                  value={punishmentTaskProof[task.id] || ''}
+                  onChange={e => setPunishmentTaskProof(prev => ({ ...prev, [task.id]: e.target.value }))}
+                />
+                <button className="save-btn" onClick={() => completePunishmentTask(task.id)}>
+                  Mark as Done
+                </button>
+              </div>
             ))}
           </div>
-          <div className="dot-legend">
-            <span><span className="dot dot-mood-high dot-inline" /> Good</span>
-            <span><span className="dot dot-mood-mid dot-inline" /> Okay</span>
-            <span><span className="dot dot-mood-low dot-inline" /> Low</span>
-            <span><span className="dot dot-partial dot-inline" /> Partial</span>
-            <span><span className="dot dot-missed dot-inline" /> Missed</span>
-            <span><span className="dot dot-none dot-inline" /> No data</span>
-          </div>
-        </>)}
-      </section>
+        </section>
+      )}
 
-      {/* Goals with per-goal proof */}
+      {/* ── 1. GOALS — the primary action ── */}
       <section className="card card-accent-green">
         <h2 className="card-header" onClick={() => toggleCollapse('goals')}>
           Goals <span className="card-header-count">{completedGoalsWithProof}/{goals.length}</span> {collapsed.goals ? '+' : ''}
@@ -1717,13 +1744,7 @@ function App({ userId }) {
                             <span className="goal-proof-hint">Proof required</span>
                           )}
                         </div>
-                        {verificationStatus && (
-                          <div className="verification-meta">
-                            <span className={`verification-chip verification-${verificationStatus}`}>{verificationLabel}</span>
-                            {gp.auditRequired && <span className="verification-audit-flag">Random audit</span>}
-                          </div>
-                        )}
-                        {gp.verificationReason && (
+                        {gp.verificationReason && verificationStatus !== 'pending' && (
                           <p className="verification-reason">{gp.verificationReason}</p>
                         )}
                         {gp.proofImagePath && (
@@ -1755,10 +1776,10 @@ function App({ userId }) {
         </>)}
       </section>
 
-      {/* Mood */}
+      {/* ── 2. MOOD — quick tap ── */}
       <section className="card card-accent-purple">
         <h2 className="card-header" onClick={() => toggleCollapse('mood')}>
-          Mood / Energy {mood > 0 && <span className="card-header-val">{MOOD_LABELS[mood - 1]}</span>} {collapsed.mood ? '+' : ''}
+          Mood {mood > 0 && <span className="card-header-val">{MOOD_LABELS[mood - 1]}</span>} {collapsed.mood ? '+' : ''}
         </h2>
         {!collapsed.mood && (
           <div className="mood-scale">
@@ -1776,33 +1797,32 @@ function App({ userId }) {
         )}
       </section>
 
-      {/* What I Learned */}
+      {/* ── 3. REFLECTIONS — text inputs ── */}
       <section className="card">
         <h2 className="card-header" onClick={() => toggleCollapse('learned')}>
-          What I Learned Today {collapsed.learned ? '+' : ''}
+          What I Learned {collapsed.learned ? '+' : ''}
         </h2>
         {!collapsed.learned && (<>
           <textarea className="field-textarea"
-            placeholder={goals.length === 0 ? 'Start by adding goals in Settings, then describe what you learned here...' : 'What did you learn today? (at least 50 characters)'}
+            placeholder="What did you learn today? (at least 50 characters)"
             value={learned} onChange={e => setLearned(e.target.value)} rows={3} />
-          <p className={`char-count ${learned.trim().length >= 50 ? 'met' : ''}`}>{learned.trim().length}/50 characters</p>
+          <p className={`char-count ${learned.trim().length >= 50 ? 'met' : ''}`}>{learned.trim().length}/50</p>
         </>)}
       </section>
 
-      {/* What I Built */}
       <section className="card">
         <h2 className="card-header" onClick={() => toggleCollapse('built')}>
-          What I Built / Wrote {collapsed.built ? '+' : ''}
+          What I Built {collapsed.built ? '+' : ''}
         </h2>
         {!collapsed.built && (<>
           <textarea className="field-textarea" placeholder="Describe what you built or wrote today..."
             value={built} onChange={e => setBuilt(e.target.value)} rows={3} />
-          <input type="url" className="field-input" placeholder="GitHub link (optional)"
+          <input type="url" className="field-input" placeholder="Link (optional)"
             value={builtLink} onChange={e => setBuiltLink(e.target.value)} />
         </>)}
       </section>
 
-      {/* Vote Progress */}
+      {/* ── 4. VOTE PROGRESS — if any pending ── */}
       {pendingVotes.length > 0 && (
         <section className="card card-accent-vote">
           <h2 className="card-header" onClick={() => toggleCollapse('votes')}>
@@ -1818,15 +1838,14 @@ function App({ userId }) {
                       <span className="vote-tally-accept">{pv.accepts}</span>
                       <span className="vote-tally-sep">/</span>
                       <span className="vote-tally-reject">{pv.rejects}</span>
-                      <span className="vote-tally-total">({pv.totalVoted}/{pv.totalPartners} voted, {pv.requiredVotes} required)</span>
+                      <span className="vote-tally-total"> ({pv.totalVoted}/{pv.totalPartners})</span>
                     </span>
                   </div>
-                  <p className="vote-progress-excuse">"{pv.excuse.length > 100 ? pv.excuse.slice(0, 100) + '...' : pv.excuse}"</p>
+                  <p className="vote-progress-excuse">"{pv.excuse.length > 80 ? pv.excuse.slice(0, 80) + '...' : pv.excuse}"</p>
                   <div className="vote-progress-partners">
                     {pv.partnerVotes.map(p => (
                       <span key={p.email} className={`vote-partner-chip ${p.voted ? (p.vote === 'accept' ? 'chip-accept' : 'chip-reject') : 'chip-waiting'}`}>
                         {p.email.split('@')[0]}
-                        {p.voted ? (p.vote === 'accept' ? ' ✓' : ' ✗') : ' ...'}
                       </span>
                     ))}
                   </div>
@@ -1837,27 +1856,43 @@ function App({ userId }) {
         </section>
       )}
 
-      {/* Manual save fallback */}
-      {isComplete && saveStatus !== 'saved' && saveStatus !== 'saving' && (
-        <button className="save-btn" onClick={handleForceSave}>Save Now</button>
-      )}
+      {/* ── 5. 30-DAY DOTS — passive overview ── */}
+      <section className="card">
+        <h2 className="card-header" onClick={() => toggleCollapse('dots')}>
+          Last 30 Days {collapsed.dots ? '+' : ''}
+        </h2>
+        {!collapsed.dots && (<>
+          <div className="dot-grid">
+            {last30.map(({ date, status, moodLevel }) => (
+              <div key={date}
+                className={`dot ${status === 'completed' ? (moodLevel >= 4 ? 'dot-mood-high' : moodLevel === 3 ? 'dot-mood-mid' : moodLevel >= 1 ? 'dot-mood-low' : 'dot-completed') : `dot-${status}`}`}
+                title={`${formatShortDate(date)}: ${status}${moodLevel ? ` (mood ${moodLevel})` : ''}`} />
+            ))}
+          </div>
+          <div className="dot-legend">
+            <span><span className="dot dot-mood-high dot-inline" /> Good</span>
+            <span><span className="dot dot-mood-mid dot-inline" /> Okay</span>
+            <span><span className="dot dot-mood-low dot-inline" /> Low</span>
+            <span><span className="dot dot-partial dot-inline" /> Partial</span>
+            <span><span className="dot dot-missed dot-inline" /> Missed</span>
+          </div>
+        </>)}
+      </section>
 
-      {/* History */}
-      <button className="history-toggle" onClick={toggleHistory}>
-        {showHistory ? 'Hide History' : 'View History'}
-      </button>
-
-      {showHistory && (
-        <section className="card history-card">
-          <h2>History</h2>
-          {history.length === 0 && <p className="empty-state">No entries yet. Complete your first check-in to start building history.</p>}
+      {/* ── 6. HISTORY — on demand ── */}
+      <section className="card">
+        <h2 className="card-header" onClick={toggleHistory}>
+          History {showHistory ? '' : '+'}
+        </h2>
+        {showHistory && (<>
+          {history.length === 0 && <p className="empty-state">No entries yet.</p>}
           {history.map(entry => (
             <div key={`${entry.type}-${entry.date}`} className={`history-entry ${entry.type === 'missed' ? 'history-missed' : ''}`}>
               <div className="history-header">
                 <span className="history-date">{formatDate(entry.date)}</span>
                 {entry.type === 'missed'
                   ? <span className="history-badge badge-missed">Missed</span>
-                  : <span className="history-badge badge-done">Completed</span>}
+                  : <span className="history-badge badge-done">Done</span>}
               </div>
               {entry.type === 'missed' ? (
                 <p className="history-reason">{entry.excuse}</p>
@@ -1866,14 +1901,10 @@ function App({ userId }) {
                   {entry.goalProgress && entry.goalProgress.length > 0 && (
                     <span>
                       {entry.goalProgress.filter(g => g.completed).length}/{entry.goalProgress.length} goals
-                      {' '}({entry.goalProgress.filter(g => g.completed && g.verification_status === 'verified').length} verified)
                     </span>
                   )}
-                  <span>{entry.mood > 0 ? MOOD_LABELS[entry.mood - 1] : 'No mood'}</span>
+                  <span>{entry.mood > 0 ? MOOD_LABELS[entry.mood - 1] : ''}</span>
                   {entry.learned && <span className="history-learned">{entry.learned}</span>}
-                  {entry.built && <span className="history-built">{entry.built}</span>}
-                  {entry.proof_url && <a className="history-link" href={entry.proof_url} target="_blank" rel="noopener noreferrer">{entry.proof_url}</a>}
-                  {entry.proof_image_path && <img src={entry.proof_image_path} alt="Proof" className="history-proof-img" />}
                 </div>
               )}
             </div>
@@ -1883,7 +1914,12 @@ function App({ userId }) {
               Load More
             </button>
           )}
-        </section>
+        </>)}
+      </section>
+
+      {/* Manual save — only when autosave hasn't kicked in */}
+      {isComplete && saveStatus !== 'saved' && saveStatus !== 'saving' && (
+        <button className="save-btn save-fallback" onClick={handleForceSave}>Save Now</button>
       )}
 
       {toast && <div className={`toast toast-${toast.type}`}>{toast.message}</div>}

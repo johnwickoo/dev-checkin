@@ -27,23 +27,28 @@ function SettingsPage({ userId, onSetupComplete, onSkip, onLogout, theme = 'dark
 
   async function loadData() {
     setLoading(true)
-    const [goalsRes, completedGoalsRes, partnersRes] = await Promise.all([
+    const [goalsRes, completedGoalsRes, partnersRes, settingsRes] = await Promise.all([
       supabase.from('goals').select('*').eq('user_id', userId).eq('active', true).order('created_at'),
       supabase.from('goals').select('*').eq('user_id', userId).not('completed_at', 'is', null)
         .order('completed_at', { ascending: false }).limit(20),
       supabase.from('accountability_partners').select('*').eq('user_id', userId).order('created_at'),
+      supabase.from('user_settings').select('*').eq('user_id', userId).maybeSingle(),
     ])
     if (goalsRes.data) setGoals(goalsRes.data)
     if (completedGoalsRes.data) setCompletedGoals(completedGoalsRes.data)
     if (partnersRes.data) setPartners(partnersRes.data)
 
-    // Load rest days from localStorage
-    const stored = JSON.parse(localStorage.getItem(`rest_days_${userId}`) || '[]')
-    setRestDays(stored)
-
-    // Load reminder hour
-    const hour = parseInt(localStorage.getItem(`reminder_hour_${userId}`) || '21', 10)
-    setReminderHour(hour)
+    // Load rest days from server (fall back to localStorage for migration)
+    const serverSettings = settingsRes.data
+    if (serverSettings) {
+      setRestDays(serverSettings.rest_days || [])
+      setReminderHour(serverSettings.reminder_hour ?? 21)
+    } else {
+      const stored = JSON.parse(localStorage.getItem(`rest_days_${userId}`) || '[]')
+      setRestDays(stored)
+      const hour = parseInt(localStorage.getItem(`reminder_hour_${userId}`) || '21', 10)
+      setReminderHour(hour)
+    }
 
     setLoading(false)
   }
@@ -130,10 +135,21 @@ function SettingsPage({ userId, onSetupComplete, onSkip, onLogout, theme = 'dark
     setPartners(prev => prev.filter(p => p.id !== id))
   }
 
+  async function saveSettings(updates) {
+    const { error: err } = await supabase.from('user_settings')
+      .upsert({ user_id: userId, ...updates }, { onConflict: 'user_id' })
+    if (err) setError(err.message)
+  }
+
   function toggleRestDay(day) {
     setRestDays(prev => {
       const next = prev.includes(day) ? prev.filter(d => d !== day) : [...prev, day]
-      localStorage.setItem(`rest_days_${userId}`, JSON.stringify(next))
+      if (next.length > 2) {
+        setError('Maximum 2 rest days per week allowed')
+        return prev
+      }
+      setError('')
+      saveSettings({ rest_days: next })
       return next
     })
   }
@@ -141,7 +157,7 @@ function SettingsPage({ userId, onSetupComplete, onSkip, onLogout, theme = 'dark
   function handleReminderHour(val) {
     const h = Math.max(0, Math.min(23, parseInt(val, 10) || 0))
     setReminderHour(h)
-    localStorage.setItem(`reminder_hour_${userId}`, h.toString())
+    saveSettings({ reminder_hour: h })
   }
 
   async function requestNotifPermission() {
@@ -337,6 +353,32 @@ function SettingsPage({ userId, onSetupComplete, onSkip, onLogout, theme = 'dark
             )}
           </>
         )}
+      </section>
+
+      <section className="card card-accent-red">
+        <h2>Punishment Suggestions</h2>
+        <p className="subtitle">
+          This link is auto-included in accountability emails by the server. Share manually only if you want extra suggestions.
+        </p>
+        <div className="settings-add">
+          <input
+            type="text"
+            className="field-input"
+            readOnly
+            value={`${window.location.origin}/punish?for=${userId}`}
+            onFocus={e => e.target.select()}
+          />
+          <button
+            className="save-btn settings-add-btn"
+            onClick={() => {
+              navigator.clipboard.writeText(`${window.location.origin}/punish?for=${userId}`)
+              setError('Link copied!')
+              setTimeout(() => setError(''), 2000)
+            }}
+          >
+            Copy Link
+          </button>
+        </div>
       </section>
 
       {(onToggleTheme || onLogout) && (

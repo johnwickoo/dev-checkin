@@ -1465,6 +1465,72 @@ header h1::before {
   border-left: 2px solid #a78bfa44;
 }
 
+.card-accent-red {
+  border-left: 2px solid #f8717144;
+}
+
+/* Punishment suggestion page */
+.punish-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.punish-char-count {
+  font-size: 0.75rem;
+  color: #555;
+  text-align: right;
+  margin-top: -0.3rem;
+}
+
+/* Punishment task blocks on check-in page */
+.punishment-task-block {
+  background: #1a1111;
+  border: 1px solid #3a1a1a;
+  border-radius: 8px;
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.punishment-task-desc {
+  font-size: 0.9rem;
+  color: #e0e0e0;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.punishment-task-due {
+  font-size: 0.78rem;
+  color: #f87171;
+}
+
+.punishment-task-inline {
+  background: #1a1111;
+  border: 1px solid #3a1a1a;
+  border-radius: 8px;
+  padding: 0.75rem;
+  margin-top: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.punishment-task-inline h3 {
+  font-size: 0.85rem;
+  color: #f87171;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin: 0;
+}
+
+.punishment-task-note {
+  font-size: 0.75rem;
+  color: #555;
+  font-style: italic;
+}
+
 /* Collapsible card header */
 .card-header {
   cursor: pointer;
