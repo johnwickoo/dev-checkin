@@ -179,16 +179,17 @@ async function checkVoteVerdicts() {
     localStorage.setItem(`checkin-${date}`, JSON.stringify(entry))
 
     if (verdict === 'rejected' && !entry.shameEmailSent) {
-      // Send shame email
+      // Send shame email to each accountability partner
       try {
-        await emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_SHAME_TEMPLATE, {
-          to_emails: ACCOUNTABILITY_EMAILS.join(','),
-          missed_date: formatDate(date),
-          excuse_text: excuse,
-          accept_count: accepts,
-          reject_count: rejects,
-          total_votes: votes.length,
-        }, EMAILJS_PUBLIC_KEY)
+        for (const email of ACCOUNTABILITY_EMAILS) {
+          await emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_SHAME_TEMPLATE, {
+            to_email: email,
+            missed_date: formatDate(date),
+            excuse_text: excuse,
+            reject_count: rejects,
+            total_votes: votes.length,
+          }, EMAILJS_PUBLIC_KEY)
+        }
 
         entry.shameEmailSent = true
         localStorage.setItem(`checkin-${date}`, JSON.stringify(entry))
@@ -280,27 +281,24 @@ function App() {
       reject: `${VOTE_BASE_URL}?id=${excuseId}&email=${encodeURIComponent(email)}&date=${missedDate}&excuse=${encodedExcuse}&vote=reject`,
     }))
 
-    const templateParams = {
-      to_emails: ACCOUNTABILITY_EMAILS.join(','),
-      missed_date: formatDate(missedDate),
-      excuse_text: excuse,
-      was_avoidable: missedAvoidable ? 'Yes' : 'No',
-      streak_before: streakBefore,
-      vote_links: JSON.stringify(voteLinks),
-      excuse_id: excuseId,
-      // Generic vote URL (template can use per-recipient links from vote_links,
-      // or fall back to these with {{to_email}} placeholder)
-      accept_url: `${VOTE_BASE_URL}?id=${excuseId}&date=${missedDate}&excuse=${encodedExcuse}`,
-      reject_url: `${VOTE_BASE_URL}?id=${excuseId}&date=${missedDate}&excuse=${encodedExcuse}`,
-    }
-
     try {
-      await emailjs.send(
-        EMAILJS_SERVICE_ID,
-        EMAILJS_TEMPLATE_ID,
-        templateParams,
-        EMAILJS_PUBLIC_KEY,
-      )
+      // Send one email per accountability partner (with personalized vote links)
+      for (const link of voteLinks) {
+        await emailjs.send(
+          EMAILJS_SERVICE_ID,
+          EMAILJS_TEMPLATE_ID,
+          {
+            to_email: link.email,
+            missed_date: formatDate(missedDate),
+            excuse_text: excuse,
+            was_avoidable: missedAvoidable ? 'Yes' : 'No',
+            streak: streakBefore,
+            accept_url: link.accept,
+            reject_url: link.reject,
+          },
+          EMAILJS_PUBLIC_KEY,
+        )
+      }
       saveData(missedDate, {
         missedReason: excuse,
         wasAvoidable: missedAvoidable,
