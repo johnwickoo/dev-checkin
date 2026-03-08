@@ -68,15 +68,23 @@ function StatsPage({ userId }) {
     if (checkins.length > 0) {
       const checkinIds = checkins.map(c => c.id)
       const { data: gpRows } = await supabase.from('goal_progress')
-        .select('checkin_id, goal_id, completed, proof_url, proof_image_path')
+        .select('checkin_id, goal_id, completed, proof_url, proof_image_path, verification_status')
         .in('checkin_id', checkinIds)
       allGoalProgress = gpRows || []
     }
 
     const dailyQuality = buildDailyGoalQuality(checkins, allGoalProgress)
+    const verifiedDailyQuality = buildDailyGoalQuality(
+      checkins,
+      allGoalProgress,
+      STREAK_MIN_COMPLETION_RATIO,
+      { requireVerified: true },
+    )
     const qualifiedDates = getQualifiedDateSet(dailyQuality)
+    const verifiedQualifiedDates = getQualifiedDateSet(verifiedDailyQuality)
     const qualifiedDays = qualifiedDates.size
     const avgGoalCompletion = getAverageCompletionPct(dailyQuality)
+    const avgVerifiedCompletion = getAverageCompletionPct(verifiedDailyQuality)
 
     // Rest days
     const restDays = JSON.parse(localStorage.getItem(`rest_days_${userId}`) || '[]')
@@ -90,6 +98,17 @@ function StatsPage({ userId }) {
       if (restDays.includes(dow)) { d = dateOffset(d, -1); continue }
       if (!qualifiedDates.has(d)) break
       currentStreak++
+      d = dateOffset(d, -1)
+    }
+
+    let verifiedCurrentStreak = 0
+    if (verifiedQualifiedDates.has(today)) verifiedCurrentStreak = 1
+    d = dateOffset(today, -1)
+    while (true) {
+      const dow = new Date(d).getDay()
+      if (restDays.includes(dow)) { d = dateOffset(d, -1); continue }
+      if (!verifiedQualifiedDates.has(d)) break
+      verifiedCurrentStreak++
       d = dateOffset(d, -1)
     }
 
@@ -148,17 +167,19 @@ function StatsPage({ userId }) {
         const recentCheckinIds = new Set(last30Checkins.map(c => c.id))
         goalStats = goals.map(g => {
           const entries = allGoalProgress.filter(p => recentCheckinIds.has(p.checkin_id) && p.goal_id === g.id)
-          const completed = entries.filter(e => e.completed && hasGoalProof(e)).length
+          const completed = entries.filter(e => e.completed && hasGoalProof(e) && e.verification_status !== 'failed').length
+          const verified = entries.filter(e => e.completed && hasGoalProof(e) && e.verification_status === 'verified').length
           return {
             id: g.id,
             title: g.title,
             completed,
+            verified,
             total: last30Checkins.length,
             pct: last30Checkins.length > 0 ? Math.round((completed / last30Checkins.length) * 100) : 0,
           }
         })
       } else {
-        goalStats = goals.map(g => ({ id: g.id, title: g.title, completed: 0, total: 0, pct: 0 }))
+        goalStats = goals.map(g => ({ id: g.id, title: g.title, completed: 0, verified: 0, total: 0, pct: 0 }))
       }
     }
 
@@ -173,8 +194,10 @@ function StatsPage({ userId }) {
     setStats({
       currentStreak,
       longestStreak,
+      verifiedCurrentStreak,
       qualifiedDays,
       avgGoalCompletion,
+      avgVerifiedCompletion,
       totalLogged: checkins.length,
       activeDays,
       consistency: Math.min(consistency, 100),
@@ -208,6 +231,10 @@ function StatsPage({ userId }) {
             <span className="stat-label">Current Streak</span>
           </div>
           <div className="stat-block">
+            <span className="stat-value">{stats.verifiedCurrentStreak}</span>
+            <span className="stat-label">Verified Streak</span>
+          </div>
+          <div className="stat-block">
             <span className="stat-value">{stats.longestStreak}</span>
             <span className="stat-label">Longest Streak</span>
           </div>
@@ -215,7 +242,13 @@ function StatsPage({ userId }) {
             <span className={`stat-value ${stats.avgGoalCompletion < 50 ? 'stat-bad' : stats.avgGoalCompletion >= 80 ? 'stat-good' : ''}`}>
               {stats.avgGoalCompletion}%
             </span>
-            <span className="stat-label">Avg Goal Completion</span>
+            <span className="stat-label">Submitted Completion</span>
+          </div>
+          <div className="stat-block">
+            <span className={`stat-value ${stats.avgVerifiedCompletion < 50 ? 'stat-bad' : stats.avgVerifiedCompletion >= 80 ? 'stat-good' : ''}`}>
+              {stats.avgVerifiedCompletion}%
+            </span>
+            <span className="stat-label">Verified Completion</span>
           </div>
           <div className="stat-block">
             <span className="stat-value">{stats.qualifiedDays}</span>
@@ -235,7 +268,7 @@ function StatsPage({ userId }) {
         <div className="stat-sub">
           {stats.totalLogged} days logged / {stats.activeDays} active days (rest days excluded)
           <br />
-          {stats.qualifiedDays} days met streak quality ({streakThresholdPct}%+ completed with proof)
+          {stats.qualifiedDays} days met submission quality ({streakThresholdPct}%+ completed with proof)
         </div>
       </section>
 
@@ -247,7 +280,7 @@ function StatsPage({ userId }) {
               <div key={g.id} className="goal-stat-row">
                 <div className="goal-stat-info">
                   <span className="goal-stat-name">{g.title}</span>
-                  <span className="goal-stat-detail">{g.completed}/{g.total} days completed</span>
+                  <span className="goal-stat-detail">{g.completed}/{g.total} completed • {g.verified}/{g.total} verified</span>
                 </div>
                 <div className="goal-stat-bar-track">
                   <div

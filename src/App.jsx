@@ -4,6 +4,7 @@ import { supabase } from './supabase.js'
 import {
   STREAK_MIN_COMPLETION_RATIO,
   hasGoalProof,
+  getVerificationStatus,
   buildDailyGoalQuality,
   getQualifiedDateSet,
   getAverageCompletionPct,
@@ -17,6 +18,12 @@ const EMAILJS_PUBLIC_KEY     = import.meta.env.VITE_EMAILJS_PUBLIC_KEY
 const VOTE_BASE_URL          = import.meta.env.VITE_VOTE_BASE_URL
 
 const MOOD_LABELS = ['Burnt out', 'Low', 'Okay', 'Focused', 'Locked in']
+const VERIFICATION_LABELS = {
+  verified: 'Verified',
+  pending: 'Pending Review',
+  failed: 'Failed',
+  challenged: 'Challenged',
+}
 
 function toDateKey(date) {
   const y = date.getFullYear()
@@ -48,6 +55,119 @@ function formatDate(dateStr) {
 function formatShortDate(dateStr) {
   const [y, m, d] = dateStr.split('-').map(Number)
   return new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+}
+
+function toIsoInHours(hours) {
+  return new Date(Date.now() + hours * 60 * 60 * 1000).toISOString()
+}
+
+function getWeekKey(dateStr) {
+  const [y, m, d] = dateStr.split('-').map(Number)
+  const dt = new Date(y, m - 1, d)
+  dt.setDate(dt.getDate() - dt.getDay())
+  return toDateKey(dt)
+}
+
+function hashString(input) {
+  let hash = 0
+  for (let i = 0; i < input.length; i++) {
+    hash = (hash * 31 + input.charCodeAt(i)) >>> 0
+  }
+  return hash
+}
+
+function isWeeklyAuditRequired(userId, goalId, dateStr) {
+  const weekKey = getWeekKey(dateStr)
+  return hashString(`${userId}:${goalId}:${weekKey}`) % 6 === 0
+}
+
+function evaluateGoalVerification({ userId, goalId, date, completed, proofUrl, proofImagePath, previousProgress }) {
+  const previousStatus = getVerificationStatus(previousProgress)
+  const previousVerifiedAt = previousProgress?.verifiedAt || previousProgress?.verified_at || null
+  const previousChallengeWindow = previousProgress?.challengeWindowEndsAt || previousProgress?.challenge_window_ends_at || null
+
+  function getStatusTimestamp(status) {
+    if (status === 'pending' || status === 'challenged') return null
+    if (previousStatus === status && previousVerifiedAt) return previousVerifiedAt
+    return new Date().toISOString()
+  }
+
+  if (!completed) {
+    return {
+      verificationStatus: null,
+      verificationReason: null,
+      verifiedAt: null,
+      verifiedBy: null,
+      auditRequired: false,
+      challengeWindowEndsAt: null,
+    }
+  }
+
+  const url = proofUrl?.trim() || ''
+  const hasImage = Boolean(proofImagePath)
+  const hasProof = Boolean(url || hasImage)
+  const challengeWindowEndsAt = previousChallengeWindow || toIsoInHours(24)
+  if (!hasProof) {
+    return {
+      verificationStatus: 'failed',
+      verificationReason: 'Completed goal is missing proof',
+      verifiedAt: getStatusTimestamp('failed'),
+      verifiedBy: 'auto:validation',
+      auditRequired: false,
+      challengeWindowEndsAt,
+    }
+  }
+
+  if (url) {
+    const isGitHub = /^https?:\/\/(www\.)?github\.com\/.+/i.test(url)
+    if (isGitHub) {
+      const matchesCommit = /\/commit\/[0-9a-f]{7,40}(?:$|[/?#])/i.test(url)
+      const matchesPull = /\/pull\/\d+(?:$|[/?#])/i.test(url)
+      const matchesActionRun = /\/actions\/runs\/\d+(?:$|[/?#])/i.test(url)
+      if (matchesCommit || matchesPull || matchesActionRun) {
+        return {
+          verificationStatus: 'verified',
+          verificationReason: 'Auto-verified from GitHub proof pattern',
+          verifiedAt: getStatusTimestamp('verified'),
+          verifiedBy: 'auto:github-pattern',
+          auditRequired: false,
+          challengeWindowEndsAt,
+        }
+      }
+      return {
+        verificationStatus: 'failed',
+        verificationReason: 'GitHub proof must link to a commit, PR, or action run',
+        verifiedAt: getStatusTimestamp('failed'),
+        verifiedBy: 'auto:github-pattern',
+        auditRequired: false,
+        challengeWindowEndsAt,
+      }
+    }
+
+    const auditRequired = isWeeklyAuditRequired(userId, goalId, date)
+    return {
+      verificationStatus: 'pending',
+      verificationReason: auditRequired
+        ? 'Pending review (selected for random weekly audit)'
+        : 'Pending manual review for external proof link',
+      verifiedAt: null,
+      verifiedBy: null,
+      auditRequired,
+      challengeWindowEndsAt,
+    }
+  }
+
+  const auditRequired = isWeeklyAuditRequired(userId, goalId, date)
+  return {
+    verificationStatus: 'pending',
+    verificationReason: auditRequired
+      ? 'Pending review for image proof (selected for random weekly audit)'
+      : 'Pending manual review for image proof',
+    verifiedAt: null,
+    verifiedBy: null,
+    auditRequired,
+    challengeWindowEndsAt,
+  }
 }
 
 // ── Offline queue ──────────────────────────────────────────
@@ -147,7 +267,9 @@ function App({ userId }) {
   const [historyPage, setHistoryPage] = useState(0)
   const [historyHasMore, setHistoryHasMore] = useState(true)
   const [streak, setStreak] = useState(0)
+  const [verifiedStreak, setVerifiedStreak] = useState(0)
   const [completionAvgPct, setCompletionAvgPct] = useState(0)
+  const [verifiedAvgPct, setVerifiedAvgPct] = useState(0)
   const [last30, setLast30] = useState([])
   const [collapsed, setCollapsed] = useState({})
   const [postSubmitUiApplied, setPostSubmitUiApplied] = useState(false)
@@ -226,18 +348,49 @@ function App({ userId }) {
       setSaveStatus('saved')
 
       const { data: gp } = await supabase.from('goal_progress')
-        .select('goal_id, completed, proof_url, proof_image_path').eq('checkin_id', c.id)
+        .select('goal_id, completed, proof_url, proof_image_path, verification_status, verification_reason, verified_at, verified_by, audit_required, challenge_window_ends_at')
+        .eq('checkin_id', c.id)
       const progress = {}
-      for (const g of userGoals) progress[g.id] = { completed: false, proofUrl: '', proofImagePath: '' }
+      for (const g of userGoals) {
+        progress[g.id] = {
+          completed: false,
+          proofUrl: '',
+          proofImagePath: '',
+          verificationStatus: null,
+          verificationReason: null,
+          verifiedAt: null,
+          verifiedBy: null,
+          auditRequired: false,
+          challengeWindowEndsAt: null,
+        }
+      }
       if (gp) for (const row of gp) progress[row.goal_id] = {
         completed: row.completed,
         proofUrl: row.proof_url || '',
         proofImagePath: row.proof_image_path || '',
+        verificationStatus: row.verification_status || (row.completed ? 'pending' : null),
+        verificationReason: row.verification_reason || null,
+        verifiedAt: row.verified_at || null,
+        verifiedBy: row.verified_by || null,
+        auditRequired: !!row.audit_required,
+        challengeWindowEndsAt: row.challenge_window_ends_at || null,
       }
       setGoalProgress(progress)
     } else {
       const progress = {}
-      for (const g of userGoals) progress[g.id] = { completed: false, proofUrl: '', proofImagePath: '' }
+      for (const g of userGoals) {
+        progress[g.id] = {
+          completed: false,
+          proofUrl: '',
+          proofImagePath: '',
+          verificationStatus: null,
+          verificationReason: null,
+          verifiedAt: null,
+          verifiedBy: null,
+          auditRequired: false,
+          challengeWindowEndsAt: null,
+        }
+      }
       setGoalProgress(progress)
     }
 
@@ -272,15 +425,23 @@ function App({ userId }) {
     if (checkins.length > 0) {
       const checkinIds = checkins.map(c => c.id)
       const { data: gpRows } = await supabase.from('goal_progress')
-        .select('checkin_id, completed, proof_url, proof_image_path')
+        .select('checkin_id, completed, proof_url, proof_image_path, verification_status')
         .in('checkin_id', checkinIds)
       allGoalProgress = gpRows || []
     }
 
     const dailyQuality = buildDailyGoalQuality(checkins, allGoalProgress)
+    const verifiedDailyQuality = buildDailyGoalQuality(
+      checkins,
+      allGoalProgress,
+      STREAK_MIN_COMPLETION_RATIO,
+      { requireVerified: true },
+    )
     const qualifiedDates = getQualifiedDateSet(dailyQuality)
+    const verifiedQualifiedDates = getQualifiedDateSet(verifiedDailyQuality)
     const recentQualityFrom = dateOffset(today, -29)
     setCompletionAvgPct(getAverageCompletionPct(dailyQuality, recentQualityFrom))
+    setVerifiedAvgPct(getAverageCompletionPct(verifiedDailyQuality, recentQualityFrom))
 
     const checkinMap = {}
     for (const c of checkins) checkinMap[c.date] = c.mood
@@ -299,6 +460,17 @@ function App({ userId }) {
     }
     setStreak(s)
 
+    let vs = 0
+    if (verifiedQualifiedDates.has(today)) vs = 1
+    d = dateOffset(today, -1)
+    while (true) {
+      const dow = new Date(d).getDay()
+      if (restDays.includes(dow)) { d = dateOffset(d, -1); continue }
+      if (!verifiedQualifiedDates.has(d)) break
+      vs++; d = dateOffset(d, -1)
+    }
+    setVerifiedStreak(vs)
+
     // Last 30 — color-coded by mood
     const dots = []
     for (let i = 29; i >= 0; i--) {
@@ -307,9 +479,11 @@ function App({ userId }) {
       const isRest = restDays.includes(dow)
       const moodVal = checkinMap[date]
       const dayQuality = dailyQuality[date]
+      const verifiedDayQuality = verifiedDailyQuality[date]
       let status = 'none'
       let moodLevel = 0
-      if (dayQuality?.qualifies) { status = 'completed'; moodLevel = moodVal }
+      if (verifiedDayQuality?.qualifies) { status = 'completed'; moodLevel = moodVal }
+      else if (dayQuality?.qualifies) { status = 'partial'; moodLevel = moodVal }
       else if (moodVal !== undefined) { status = 'partial'; moodLevel = moodVal }
       else if (missedDates.has(date)) status = 'missed'
       else if (isRest) status = 'rest'
@@ -415,22 +589,95 @@ function App({ userId }) {
       }
 
       // Batch upsert goal progress with per-goal proofs
-      const gpRows = Object.entries(goalProgress).map(([goalId, gp]) => ({
-        checkin_id: checkinId, goal_id: goalId,
-        completed: gp.completed,
-        proof_url: gp.proofUrl?.trim() || null,
-        proof_image_path: gp.proofImagePath || null,
-      }))
+      const nextGoalProgress = { ...goalProgress }
+      const verificationLogs = []
+      const gpRows = Object.entries(goalProgress).map(([goalId, gp]) => {
+        const proofUrl = gp.proofUrl?.trim() || ''
+        const proofImagePath = gp.proofImagePath || null
+        const verification = evaluateGoalVerification({
+          userId,
+          goalId,
+          date: today,
+          completed: gp.completed,
+          proofUrl,
+          proofImagePath,
+          previousProgress: gp,
+        })
+
+        nextGoalProgress[goalId] = {
+          ...gp,
+          proofUrl,
+          proofImagePath: proofImagePath || '',
+          verificationStatus: verification.verificationStatus,
+          verificationReason: verification.verificationReason,
+          verifiedAt: verification.verifiedAt,
+          verifiedBy: verification.verifiedBy,
+          auditRequired: verification.auditRequired,
+          challengeWindowEndsAt: verification.challengeWindowEndsAt,
+        }
+
+        if (gp.completed && verification.verificationStatus) {
+          verificationLogs.push({
+            user_id: userId,
+            checkin_id: checkinId,
+            goal_id: goalId,
+            verification_status: verification.verificationStatus,
+            verification_reason: verification.verificationReason,
+            proof_url: proofUrl || null,
+            proof_image_path: proofImagePath || null,
+            source: verification.verifiedBy || 'auto:pending-review',
+            audit_required: verification.auditRequired,
+          })
+        }
+
+        return {
+          checkin_id: checkinId,
+          goal_id: goalId,
+          completed: gp.completed,
+          proof_url: proofUrl || null,
+          proof_image_path: proofImagePath || null,
+          verification_status: verification.verificationStatus,
+          verification_reason: verification.verificationReason,
+          verified_at: verification.verifiedAt,
+          verified_by: verification.verifiedBy,
+          audit_required: verification.auditRequired,
+          challenge_window_ends_at: verification.challengeWindowEndsAt,
+        }
+      })
       if (gpRows.length > 0) {
-        await supabase.from('goal_progress').upsert(gpRows, { onConflict: 'checkin_id,goal_id' })
+        const { error: gpError } = await supabase.from('goal_progress').upsert(gpRows, { onConflict: 'checkin_id,goal_id' })
+        if (gpError) throw gpError
+        const progressChanged = Object.keys(nextGoalProgress).some(goalId => {
+          const prev = goalProgress[goalId] || {}
+          const next = nextGoalProgress[goalId] || {}
+          return (prev.proofUrl || '').trim() !== (next.proofUrl || '').trim()
+            || (prev.proofImagePath || '') !== (next.proofImagePath || '')
+            || (prev.verificationStatus || null) !== (next.verificationStatus || null)
+            || (prev.verificationReason || null) !== (next.verificationReason || null)
+            || (prev.verifiedAt || null) !== (next.verifiedAt || null)
+            || (prev.verifiedBy || null) !== (next.verifiedBy || null)
+            || !!prev.auditRequired !== !!next.auditRequired
+            || (prev.challengeWindowEndsAt || null) !== (next.challengeWindowEndsAt || null)
+        })
+        if (progressChanged) setGoalProgress(nextGoalProgress)
+      }
+
+      if (verificationLogs.length > 0) {
+        const { error: verError } = await supabase.from('proof_verifications').insert(verificationLogs)
+        if (verError) console.error('Verification log insert failed:', verError)
       }
 
       if (version === saveVersion.current) {
         setSaveStatus('saved')
         loadStreakAndDots()
       }
-    } catch {
+    } catch (err) {
       if (version === saveVersion.current) setSaveStatus('error')
+      const msg = String(err?.message || '')
+      if (msg.includes('column') || msg.includes('proof_verifications')) {
+        showToast('Database schema outdated. Run the latest SQL setup.', 'error')
+      }
+      console.error('Check-in save error:', err)
     }
   }, [userId, today, mood, learned, built, builtLink, goalProgress, checkin])
 
@@ -438,14 +685,22 @@ function App({ userId }) {
   const completedGoalEntries = Object.values(goalProgress).filter(gp => gp.completed)
   const completedGoalsWithProof = completedGoalEntries.filter(gp => hasGoalProof(gp)).length
   const hasCompletedWithoutProof = completedGoalEntries.some(gp => !hasGoalProof(gp))
+  const verifiedTodayGoals = completedGoalEntries.filter(gp => getVerificationStatus(gp) === 'verified').length
+  const pendingTodayGoals = completedGoalEntries.filter(gp => getVerificationStatus(gp) === 'pending').length
+  const failedTodayGoals = completedGoalEntries.filter(gp => getVerificationStatus(gp) === 'failed').length
+  const challengedTodayGoals = completedGoalEntries.filter(gp => getVerificationStatus(gp) === 'challenged').length
+  const auditTodayGoals = completedGoalEntries.filter(gp => gp.auditRequired).length
   const dayCompletionRatio = goals.length > 0 ? completedGoalsWithProof / goals.length : 0
   const dayCompletionPct = Math.round(dayCompletionRatio * 100)
+  const dayVerifiedRatio = goals.length > 0 ? verifiedTodayGoals / goals.length : 0
+  const dayVerifiedPct = Math.round(dayVerifiedRatio * 100)
+  const hasFailedVerificationToday = failedTodayGoals > 0
   const meetsStreakThreshold = goals.length > 0 && dayCompletionRatio >= STREAK_MIN_COMPLETION_RATIO
   const isComplete = learned.trim().length >= 50
     && built.trim().length > 0
     && completedGoalsWithProof > 0
     && !hasCompletedWithoutProof
-  const doneForToday = saveStatus === 'saved' && isComplete
+  const doneForToday = saveStatus === 'saved' && isComplete && failedTodayGoals === 0
 
   useEffect(() => {
     if (!doneForToday || postSubmitUiApplied) return
@@ -492,7 +747,7 @@ function App({ userId }) {
     if (recentCheckins && recentCheckins.length > 0) {
       const checkinIds = recentCheckins.map(c => c.id)
       const { data: gpRows } = await supabase.from('goal_progress')
-        .select('checkin_id, completed, proof_url, proof_image_path')
+        .select('checkin_id, completed, proof_url, proof_image_path, verification_status')
         .in('checkin_id', checkinIds)
       const dailyQuality = buildDailyGoalQuality(recentCheckins, gpRows || [])
       const qualifiedDates = getQualifiedDateSet(dailyQuality)
@@ -540,7 +795,16 @@ function App({ userId }) {
     const { data: urlData } = supabase.storage.from('proof-images').getPublicUrl(path)
     setGoalProgress(prev => ({
       ...prev,
-      [goalId]: { ...prev[goalId], proofImagePath: urlData.publicUrl },
+      [goalId]: {
+        ...prev[goalId],
+        proofImagePath: urlData.publicUrl,
+        verificationStatus: prev[goalId]?.completed ? 'pending' : null,
+        verificationReason: prev[goalId]?.completed ? 'Will verify on save' : null,
+        verifiedAt: null,
+        verifiedBy: null,
+        auditRequired: false,
+        challengeWindowEndsAt: null,
+      },
     }))
     setUploading(null)
     showToast('Image uploaded')
@@ -571,7 +835,7 @@ function App({ userId }) {
     if (checkins.length > 0) {
       const cids = checkins.map(c => c.id)
       const { data: allGp } = await supabase.from('goal_progress')
-        .select('checkin_id, goal_id, completed').in('checkin_id', cids)
+        .select('checkin_id, goal_id, completed, verification_status').in('checkin_id', cids)
       for (const c of checkins) {
         const gp = (allGp || []).filter(g => g.checkin_id === c.id)
         newEntries.push({ ...c, type: 'checkin', goalProgress: gp })
@@ -604,7 +868,7 @@ function App({ userId }) {
 
   // ── Auto-save status label ────────────────────────────────
   const saveLabel = saveStatus === 'saving' ? 'Saving...'
-    : saveStatus === 'saved' ? (doneForToday ? 'All set for today' : 'Saved')
+    : saveStatus === 'saved' ? (doneForToday ? 'All set for today' : hasFailedVerificationToday ? 'Saved - fix failed proof' : 'Saved')
     : saveStatus === 'error' ? 'Save failed'
     : isComplete ? 'Will auto-save' : 'Complete all fields to save'
 
@@ -688,9 +952,16 @@ function App({ userId }) {
       <header>
         <h1>Daily Check-in</h1>
         <p className="date">{dateDisplay}</p>
-        {streak > 0 && <p className="streak">{streak} day streak</p>}
+        {streak > 0 && (
+          <p className="streak">
+            {streak} day streak
+            <span className="streak-verified"> ({verifiedStreak} verified)</span>
+          </p>
+        )}
         <p className="streak-quality">
-          Quality: {completionAvgPct}% avg (30d) | Today: {dayCompletionPct}% ({meetsStreakThreshold ? 'streak-eligible' : `needs ${streakThresholdPct}%`})
+          Quality: {completionAvgPct}% submitted / {verifiedAvgPct}% verified (30d)
+          {' '}| Today: {dayCompletionPct}% submitted, {dayVerifiedPct}% verified
+          {' '}({meetsStreakThreshold ? 'submission eligible' : `needs ${streakThresholdPct}% submitted`})
         </p>
       </header>
 
@@ -701,8 +972,23 @@ function App({ userId }) {
         <section className="card day-done-card">
           <h2>All Set For Today</h2>
           <p className="day-done-text">Everything is submitted. Nothing left to do until tomorrow ({tomorrowDisplay}).</p>
-          <p className="day-done-sub">You can still edit anything below and changes will auto-save.</p>
+          <p className="day-done-sub">
+            Verification: {verifiedTodayGoals} verified, {pendingTodayGoals} pending
+            {auditTodayGoals > 0 ? `, ${auditTodayGoals} audit` : ''}
+          </p>
           <button className="history-toggle day-done-edit" onClick={openEditSections}>Edit Today&apos;s Check-in</button>
+        </section>
+      )}
+
+      {completedGoalEntries.length > 0 && (
+        <section className="card verification-summary-card">
+          <h2>Proof Verification</h2>
+          <p className="verification-summary-line">
+            {verifiedTodayGoals} verified | {pendingTodayGoals} pending | {challengedTodayGoals} challenged | {failedTodayGoals} failed
+          </p>
+          {auditTodayGoals > 0 && (
+            <p className="verification-summary-sub">Random weekly audit queue: {auditTodayGoals} goal(s)</p>
+          )}
         </section>
       )}
 
@@ -742,19 +1028,45 @@ function App({ userId }) {
           ) : (
             <div className="blocks">
               {goals.map(goal => {
-                const gp = goalProgress[goal.id] || { completed: false, proofUrl: '', proofImagePath: '' }
+                const gp = goalProgress[goal.id] || {
+                  completed: false,
+                  proofUrl: '',
+                  proofImagePath: '',
+                  verificationStatus: null,
+                  verificationReason: null,
+                  auditRequired: false,
+                }
+                const verificationStatus = gp.completed ? (getVerificationStatus(gp) || 'pending') : null
+                const verificationLabel = verificationStatus ? (VERIFICATION_LABELS[verificationStatus] || verificationStatus) : ''
                 return (
                   <div key={goal.id} className="goal-block">
                     <label className={`block ${gp.completed ? 'done' : ''}`}>
                       <input type="checkbox" checked={gp.completed}
-                        onChange={() => setGoalProgress(prev => ({
-                          ...prev,
-                          [goal.id]: { ...prev[goal.id], completed: !prev[goal.id]?.completed },
-                        }))} />
+                        onChange={() => setGoalProgress(prev => {
+                          const nextCompleted = !prev[goal.id]?.completed
+                          return {
+                            ...prev,
+                            [goal.id]: {
+                              ...prev[goal.id],
+                              completed: nextCompleted,
+                              verificationStatus: nextCompleted ? 'pending' : null,
+                              verificationReason: nextCompleted ? 'Will verify on save' : null,
+                              verifiedAt: null,
+                              verifiedBy: null,
+                              auditRequired: false,
+                              challengeWindowEndsAt: null,
+                            },
+                          }
+                        })} />
                       <span className="checkmark" />
                       <span className="block-name">
                         {goal.title}
                         {goal.deadline && <span className="goal-deadline"> (due {goal.deadline})</span>}
+                        {verificationStatus && (
+                          <span className={`verification-chip verification-${verificationStatus}`}>
+                            {verificationLabel}
+                          </span>
+                        )}
                       </span>
                       {goalWeeklyPct[goal.id] !== undefined && (
                         <ProgressRing percent={goalWeeklyPct[goal.id]} />
@@ -767,7 +1079,16 @@ function App({ userId }) {
                           value={gp.proofUrl || ''}
                           onChange={e => setGoalProgress(prev => ({
                             ...prev,
-                            [goal.id]: { ...prev[goal.id], proofUrl: e.target.value },
+                            [goal.id]: {
+                              ...prev[goal.id],
+                              proofUrl: e.target.value,
+                              verificationStatus: prev[goal.id]?.completed ? 'pending' : null,
+                              verificationReason: prev[goal.id]?.completed ? 'Will verify on save' : null,
+                              verifiedAt: null,
+                              verifiedBy: null,
+                              auditRequired: false,
+                              challengeWindowEndsAt: null,
+                            },
                           }))} />
                         <div className="goal-proof-actions">
                           <button className="history-toggle goal-proof-upload"
@@ -779,13 +1100,31 @@ function App({ userId }) {
                             <span className="goal-proof-hint">Proof required</span>
                           )}
                         </div>
+                        {verificationStatus && (
+                          <div className="verification-meta">
+                            <span className={`verification-chip verification-${verificationStatus}`}>{verificationLabel}</span>
+                            {gp.auditRequired && <span className="verification-audit-flag">Random audit</span>}
+                          </div>
+                        )}
+                        {gp.verificationReason && (
+                          <p className="verification-reason">{gp.verificationReason}</p>
+                        )}
                         {gp.proofImagePath && (
                           <div className="proof-preview">
                             <img src={gp.proofImagePath} alt="Proof" className="proof-img" />
                             <button className="settings-remove proof-remove"
                               onClick={() => setGoalProgress(prev => ({
                                 ...prev,
-                                [goal.id]: { ...prev[goal.id], proofImagePath: '' },
+                                [goal.id]: {
+                                  ...prev[goal.id],
+                                  proofImagePath: '',
+                                  verificationStatus: prev[goal.id]?.completed ? 'pending' : null,
+                                  verificationReason: prev[goal.id]?.completed ? 'Will verify on save' : null,
+                                  verifiedAt: null,
+                                  verifiedBy: null,
+                                  auditRequired: false,
+                                  challengeWindowEndsAt: null,
+                                },
                               }))}>x</button>
                           </div>
                         )}
@@ -908,7 +1247,10 @@ function App({ userId }) {
               ) : (
                 <div className="history-details">
                   {entry.goalProgress && entry.goalProgress.length > 0 && (
-                    <span>{entry.goalProgress.filter(g => g.completed).length}/{entry.goalProgress.length} goals</span>
+                    <span>
+                      {entry.goalProgress.filter(g => g.completed).length}/{entry.goalProgress.length} goals
+                      {' '}({entry.goalProgress.filter(g => g.completed && g.verification_status === 'verified').length} verified)
+                    </span>
                   )}
                   <span>{entry.mood > 0 ? MOOD_LABELS[entry.mood - 1] : 'No mood'}</span>
                   {entry.learned && <span className="history-learned">{entry.learned}</span>}

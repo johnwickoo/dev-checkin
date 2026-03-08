@@ -11,7 +11,25 @@ export function hasGoalProof(progress) {
   return Boolean(proofUrl || proofImagePath)
 }
 
-export function buildDailyGoalQuality(checkins, goalProgressRows, minCompletionRatio = STREAK_MIN_COMPLETION_RATIO) {
+export function getVerificationStatus(progress) {
+  return progress?.verification_status ?? progress?.verificationStatus ?? null
+}
+
+export function isGoalVerified(progress) {
+  return getVerificationStatus(progress) === 'verified'
+}
+
+export function isGoalFailedVerification(progress) {
+  return getVerificationStatus(progress) === 'failed'
+}
+
+export function buildDailyGoalQuality(
+  checkins,
+  goalProgressRows,
+  minCompletionRatio = STREAK_MIN_COMPLETION_RATIO,
+  options = {},
+) {
+  const { requireVerified = false, excludeFailedProofs = true } = options
   const goalProgressByCheckin = {}
   for (const row of (goalProgressRows || [])) {
     if (!row.checkin_id) continue
@@ -23,8 +41,16 @@ export function buildDailyGoalQuality(checkins, goalProgressRows, minCompletionR
   for (const checkin of (checkins || [])) {
     const rows = goalProgressByCheckin[checkin.id] || []
     const totalGoals = rows.length
-    const completedWithProof = rows.filter(row => row.completed && hasGoalProof(row)).length
+    const completedWithProof = rows.filter(row => {
+      if (!row.completed || !hasGoalProof(row)) return false
+      if (excludeFailedProofs && isGoalFailedVerification(row)) return false
+      if (requireVerified && !isGoalVerified(row)) return false
+      return true
+    }).length
     const hasCompletedWithoutProof = rows.some(row => row.completed && !hasGoalProof(row))
+    const hasFailedProof = excludeFailedProofs && rows.some(row => row.completed && isGoalFailedVerification(row))
+    const hasCompletedNotVerified = requireVerified
+      && rows.some(row => row.completed && hasGoalProof(row) && !isGoalVerified(row))
     const completionRatio = totalGoals > 0 ? completedWithProof / totalGoals : 0
 
     dailyQuality[checkin.date] = {
@@ -34,8 +60,12 @@ export function buildDailyGoalQuality(checkins, goalProgressRows, minCompletionR
       completedWithProof,
       completionRatio,
       hasCompletedWithoutProof,
+      hasFailedProof,
+      hasCompletedNotVerified,
       qualifies: totalGoals > 0
         && !hasCompletedWithoutProof
+        && !hasFailedProof
+        && !hasCompletedNotVerified
         && completionRatio >= minCompletionRatio,
     }
   }
