@@ -43,6 +43,12 @@ header h1::before {
   color: #333;
 }
 
+.streak-quality {
+  margin-top: 0.2rem;
+  font-size: 0.72rem;
+  color: #888;
+}
+
 /* Cards */
 .card {
   background: #111;
@@ -402,6 +408,10 @@ header h1::before {
   background: #ef4444;
 }
 
+.dot-partial {
+  background: #eab308;
+}
+
 .dot-none {
   background: #1a1a1a;
 }
@@ -414,6 +424,7 @@ header h1::before {
 
 .dot-legend {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.75rem;
   margin-top: 0.5rem;
   font-size: 0.7rem;
@@ -753,6 +764,115 @@ header h1::before {
   color: #4ade80 !important;
 }
 
+/* Goal deadline inline */
+.goal-deadline {
+  color: #555;
+  font-size: 0.75rem;
+}
+
+/* Proof Upload */
+.proof-upload {
+  margin-top: 0.5rem;
+}
+
+.proof-upload-btn {
+  margin-top: 0.375rem;
+}
+
+.proof-preview {
+  position: relative;
+  margin-top: 0.5rem;
+  display: inline-block;
+}
+
+.proof-img {
+  max-width: 100%;
+  max-height: 200px;
+  border-radius: 3px;
+  border: 1px solid #1a1a1a;
+}
+
+.proof-remove {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+}
+
+.history-proof-img {
+  max-width: 100%;
+  max-height: 120px;
+  border-radius: 3px;
+  border: 1px solid #1a1a1a;
+  margin-top: 0.25rem;
+}
+
+/* Settings Page */
+.settings-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 0.75rem;
+}
+
+.settings-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 0.625rem;
+  background: #0a0a0a;
+  border-radius: 2px;
+}
+
+.settings-item-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+.settings-item-name {
+  font-size: 0.85rem;
+  color: #c0c0c0;
+}
+
+.settings-item-sub {
+  font-size: 0.7rem;
+  color: #444;
+}
+
+.settings-remove {
+  width: 24px;
+  height: 24px;
+  border-radius: 2px;
+  border: 1px solid #ef444433;
+  background: transparent;
+  color: #ef4444;
+  font-family: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.settings-remove:hover {
+  background: #ef44440d;
+}
+
+.settings-add {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.settings-add .field-input {
+  margin-top: 0;
+}
+
+.settings-add-btn {
+  margin-top: 0.125rem;
+}
+
 /* Login Form */
 .login-form {
   display: flex;
@@ -1038,6 +1158,396 @@ header h1::before {
   }
 }
 
+/* Autosave Indicator */
+.autosave-indicator {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-align: right;
+  padding: 0.25rem 0;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.autosave-idle {
+  color: #333;
+}
+
+.autosave-saving {
+  color: #eab308;
+}
+
+.autosave-saved {
+  color: #4ade80;
+}
+
+.autosave-error {
+  color: #ef4444;
+}
+
+/* Done state */
+.day-done-card {
+  border-left: 2px solid #4ade8070;
+  background: linear-gradient(180deg, #4ade800f 0%, #111 100%);
+}
+
+.day-done-card h2 {
+  color: #4ade80;
+}
+
+.day-done-text {
+  margin-top: 0.4rem;
+  font-size: 0.82rem;
+  color: #c0c0c0;
+}
+
+.day-done-sub {
+  margin-top: 0.25rem;
+  font-size: 0.74rem;
+  color: #666;
+}
+
+.day-done-edit {
+  margin-top: 0.6rem;
+  width: auto;
+  padding: 0.4rem 0.8rem;
+}
+
+/* Offline Bar */
+.offline-bar {
+  background: #eab3081a;
+  color: #eab308;
+  border: 1px solid #eab30833;
+  border-radius: 3px;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-align: center;
+}
+
+/* Progress Ring */
+.progress-ring {
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+/* Card accent borders */
+.card-accent-green {
+  border-left: 2px solid #4ade8044;
+}
+
+.card-accent-purple {
+  border-left: 2px solid #a78bfa44;
+}
+
+/* Collapsible card header */
+.card-header {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  user-select: none;
+}
+
+.card-header:hover {
+  color: #888;
+}
+
+.card-header-count {
+  font-size: 0.7rem;
+  color: #4ade80;
+  font-weight: 700;
+  margin-left: 0.25rem;
+}
+
+.card-header-val {
+  font-size: 0.7rem;
+  color: #a78bfa;
+  font-weight: 600;
+  margin-left: 0.25rem;
+}
+
+/* Color-coded dots */
+.dot-mood-high {
+  background: #4ade80;
+}
+
+.dot-mood-mid {
+  background: #eab308;
+}
+
+.dot-mood-low {
+  background: #ef4444aa;
+}
+
+.dot-rest {
+  background: #1a1a1a;
+  border: 1px solid #333;
+  width: 8px;
+  height: 8px;
+}
+
+/* Per-goal proof */
+.goal-block {
+  display: flex;
+  flex-direction: column;
+}
+
+.goal-proof {
+  padding: 0.5rem 0.625rem 0.625rem 2.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.goal-proof-input {
+  margin-top: 0;
+  font-size: 0.8rem;
+}
+
+.goal-proof-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.goal-proof-upload {
+  flex: 0 0 auto;
+  width: auto;
+  padding: 0.375rem 0.75rem;
+  font-size: 0.75rem;
+}
+
+.goal-proof-hint {
+  font-size: 0.7rem;
+  color: #ef4444aa;
+  font-weight: 500;
+}
+
+/* Vote Progress */
+.card-accent-vote {
+  border-left: 2px solid #eab30844;
+}
+
+.vote-progress-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+}
+
+.vote-progress-item {
+  padding: 0.5rem 0;
+  border-bottom: 1px solid #1a1a1a;
+}
+
+.vote-progress-item:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.vote-progress-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.25rem;
+}
+
+.vote-progress-date {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #888;
+}
+
+.vote-progress-tally {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.vote-tally-accept {
+  color: #4ade80;
+}
+
+.vote-tally-reject {
+  color: #ef4444;
+}
+
+.vote-tally-sep {
+  color: #333;
+}
+
+.vote-tally-total {
+  color: #555;
+  font-weight: 500;
+  margin-left: 0.25rem;
+}
+
+.vote-progress-excuse {
+  font-size: 0.75rem;
+  color: #555;
+  font-style: italic;
+  line-height: 1.4;
+  margin-bottom: 0.375rem;
+}
+
+.vote-progress-partners {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.vote-partner-chip {
+  font-size: 0.65rem;
+  font-weight: 600;
+  padding: 0.2rem 0.5rem;
+  border-radius: 2px;
+  border: 1px solid;
+}
+
+.chip-accept {
+  border-color: #4ade8033;
+  background: #4ade800d;
+  color: #4ade80;
+}
+
+.chip-reject {
+  border-color: #ef444433;
+  background: #ef44440d;
+  color: #ef4444;
+}
+
+.chip-waiting {
+  border-color: #1a1a1a;
+  background: transparent;
+  color: #444;
+}
+
+/* Empty state text */
+.empty-state {
+  font-size: 0.8rem;
+  color: #444;
+  line-height: 1.5;
+  margin-top: 0.375rem;
+}
+
+/* Rest day grid (Settings) */
+.rest-day-grid {
+  display: flex;
+  gap: 4px;
+  margin-top: 0.5rem;
+}
+
+.rest-day-btn {
+  flex: 1;
+  padding: 0.5rem 0.25rem;
+  border-radius: 3px;
+  border: 1px solid #1a1a1a;
+  background: transparent;
+  color: #555;
+  font-family: inherit;
+  font-size: 0.7rem;
+  font-weight: 600;
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.rest-day-btn:hover {
+  background: #1a1a1a;
+}
+
+.rest-day-active {
+  border-color: #a78bfa44;
+  background: #a78bfa0d;
+  color: #a78bfa;
+}
+
+/* Notification settings */
+.notif-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.notif-label {
+  font-size: 0.85rem;
+  color: #888;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.notif-hour-input {
+  width: 56px;
+  text-align: center;
+  margin-top: 0;
+  padding: 0.375rem 0.25rem;
+}
+
+/* Settings date input fix */
+.settings-date-input {
+  color-scheme: dark;
+}
+
+/* Goal stats (Stats page) */
+.goal-stats-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+  margin-top: 0.75rem;
+}
+
+.goal-stat-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.goal-stat-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.goal-stat-name {
+  font-size: 0.8rem;
+  color: #c0c0c0;
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.goal-stat-detail {
+  font-size: 0.65rem;
+  color: #444;
+}
+
+.goal-stat-bar-track {
+  width: 80px;
+  height: 6px;
+  background: #1a1a1a;
+  border-radius: 3px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.goal-stat-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  min-width: 2px;
+}
+
+.goal-stat-pct {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #888;
+  width: 36px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
 /* Mobile */
 @media (max-width: 480px) {
   .card {
@@ -1102,5 +1612,32 @@ header h1::before {
 
   .mood-chart-legend {
     font-size: 0.55rem;
+  }
+
+  /* Toast on top for mobile */
+  .toast {
+    top: 1rem;
+    bottom: auto;
+    animation-name: toast-in-mobile;
+  }
+
+  .rest-day-btn {
+    padding: 0.375rem 0.125rem;
+    font-size: 0.6rem;
+  }
+
+  .goal-stat-bar-track {
+    width: 60px;
+  }
+}
+
+@keyframes toast-in-mobile {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
   }
 }

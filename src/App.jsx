@@ -1,684 +1,933 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import emailjs from '@emailjs/browser'
 import { supabase } from './supabase.js'
+import {
+  STREAK_MIN_COMPLETION_RATIO,
+  hasGoalProof,
+  buildDailyGoalQuality,
+  getQualifiedDateSet,
+  getAverageCompletionPct,
+} from './streakUtils.js'
 import './App.css'
 
-// ── EmailJS config ──────────────────────────────────────────
-const EMAILJS_SERVICE_ID       = import.meta.env.VITE_EMAILJS_SERVICE_ID
-const EMAILJS_TEMPLATE_ID      = import.meta.env.VITE_EMAILJS_TEMPLATE_ID
-const EMAILJS_SHAME_TEMPLATE   = import.meta.env.VITE_EMAILJS_SHAME_TEMPLATE
-const EMAILJS_PUBLIC_KEY       = import.meta.env.VITE_EMAILJS_PUBLIC_KEY
+const EMAILJS_SERVICE_ID     = import.meta.env.VITE_EMAILJS_SERVICE_ID
+const EMAILJS_TEMPLATE_ID    = import.meta.env.VITE_EMAILJS_TEMPLATE_ID
+const EMAILJS_SHAME_TEMPLATE = import.meta.env.VITE_EMAILJS_SHAME_TEMPLATE
+const EMAILJS_PUBLIC_KEY     = import.meta.env.VITE_EMAILJS_PUBLIC_KEY
+const VOTE_BASE_URL          = import.meta.env.VITE_VOTE_BASE_URL
 
-// ── Voting base URL ─────────────────────────────────────────
-const VOTE_BASE_URL = import.meta.env.VITE_VOTE_BASE_URL
-
-// ── Minimum votes needed to trigger verdict ─────────────────
-const MIN_VOTES_FOR_VERDICT = 4
-
-const ACCOUNTABILITY_EMAILS = [
-  'Juwonbal@gmail.com',
-  'Blackharjay@gmail.com',
-  'issababtunde@gmail.com',
-  'Joyindamola04@gmail.com',
-  'Dammyruth242@gmail.com',
-  'Sharuhnjacobs@gmail.com',
-]
-
-const STUDY_BLOCKS = ['Problem Solving', 'Python Backend', 'C++ Systems', 'Linux/Git']
 const MOOD_LABELS = ['Burnt out', 'Low', 'Okay', 'Focused', 'Locked in']
 
-function getToday() {
-  return new Date().toISOString().split('T')[0]
+function toDateKey(date) {
+  const y = date.getFullYear()
+  const m = String(date.getMonth() + 1).padStart(2, '0')
+  const d = String(date.getDate()).padStart(2, '0')
+  return `${y}-${m}-${d}`
 }
 
-function loadData(date) {
-  const stored = localStorage.getItem(`checkin-${date}`)
-  if (stored) return JSON.parse(stored)
-  return {
-    blocks: Object.fromEntries(STUDY_BLOCKS.map(b => [b, false])),
-    problemsSolved: 0,
-    mood: 0,
-    learned: '',
-    built: '',
-    builtLink: '',
-    proofUrl: '',
-  }
-}
-
-function saveData(date, data) {
-  localStorage.setItem(`checkin-${date}`, JSON.stringify(data))
-}
+function getToday() { return toDateKey(new Date()) }
 
 function getYesterday() {
-  const d = new Date()
-  d.setDate(d.getDate() - 1)
-  return d.toISOString().split('T')[0]
+  const d = new Date(); d.setDate(d.getDate() - 1)
+  return toDateKey(d)
 }
 
-function checkMissedYesterday() {
-  const yesterday = getYesterday()
-  const stored = localStorage.getItem(`checkin-${yesterday}`)
-  if (!stored) return yesterday
-  const parsed = JSON.parse(stored)
-  if (parsed.missedReason) return null
-  const hasActivity = parsed.mood > 0
-    || parsed.problemsSolved > 0
-    || Object.values(parsed.blocks).some(Boolean)
-  return hasActivity ? null : yesterday
+function dateOffset(dateStr, offset) {
+  const [y, m, d] = dateStr.split('-').map(Number)
+  const dt = new Date(y, m - 1, d); dt.setDate(dt.getDate() + offset)
+  return toDateKey(dt)
 }
 
 function formatDate(dateStr) {
   const [y, m, d] = dateStr.split('-').map(Number)
   return new Date(y, m - 1, d).toLocaleDateString('en-US', {
-    weekday: 'long',
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
+    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
   })
-}
-
-function dateOffset(dateStr, offset) {
-  const [y, m, d] = dateStr.split('-').map(Number)
-  const dt = new Date(y, m - 1, d)
-  dt.setDate(dt.getDate() + offset)
-  return dt.toISOString().split('T')[0]
-}
-
-function isActiveEntry(entry) {
-  if (!entry) return false
-  if (entry.missedReason) return false
-  return entry.mood > 0
-    || entry.problemsSolved > 0
-    || (entry.blocks && Object.values(entry.blocks).some(Boolean))
-}
-
-function getStreak(today) {
-  let streak = 0
-  const todayEntry = localStorage.getItem(`checkin-${today}`)
-  if (todayEntry && isActiveEntry(JSON.parse(todayEntry))) {
-    streak = 1
-  }
-  let date = dateOffset(today, -1)
-  while (true) {
-    const stored = localStorage.getItem(`checkin-${date}`)
-    if (!stored || !isActiveEntry(JSON.parse(stored))) break
-    streak++
-    date = dateOffset(date, -1)
-  }
-  return streak
-}
-
-function getLast30Days(today) {
-  const days = []
-  for (let i = 29; i >= 0; i--) {
-    const date = dateOffset(today, -i)
-    const stored = localStorage.getItem(`checkin-${date}`)
-    const entry = stored ? JSON.parse(stored) : null
-    let status = 'none'
-    if (entry && isActiveEntry(entry)) status = 'completed'
-    else if (entry && entry.missedReason) status = 'missed'
-    days.push({ date, status })
-  }
-  return days
-}
-
-function getAllEntries(today) {
-  const entries = []
-  for (let i = 0; i < 365; i++) {
-    const date = dateOffset(today, -i)
-    const stored = localStorage.getItem(`checkin-${date}`)
-    if (!stored) continue
-    const entry = JSON.parse(stored)
-    if (isActiveEntry(entry) || entry.missedReason) {
-      entries.push({ date, ...entry })
-    }
-  }
-  return entries
 }
 
 function formatShortDate(dateStr) {
   const [y, m, d] = dateStr.split('-').map(Number)
-  return new Date(y, m - 1, d).toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
+  return new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+}
+
+// ── Offline queue ──────────────────────────────────────────
+function queueOffline(action) {
+  const q = JSON.parse(localStorage.getItem('offline_queue') || '[]')
+  q.push({ ...action, ts: Date.now() })
+  localStorage.setItem('offline_queue', JSON.stringify(q))
+}
+
+async function flushOfflineQueue() {
+  const q = JSON.parse(localStorage.getItem('offline_queue') || '[]')
+  if (q.length === 0) return
+  const remaining = []
+  for (const item of q) {
+    const { error } = item.method === 'upsert'
+      ? await supabase.from(item.table).upsert(item.data, item.opts || {})
+      : item.method === 'update'
+        ? await supabase.from(item.table).update(item.data).match(item.match)
+        : await supabase.from(item.table).insert(item.data)
+    if (error) remaining.push(item)
+  }
+  localStorage.setItem('offline_queue', JSON.stringify(remaining))
+}
+
+// ── Image resize before upload ─────────────────────────────
+function resizeImage(file, maxWidth = 1200) {
+  return new Promise(resolve => {
+    if (!file.type.startsWith('image/')) { resolve(file); return }
+    const img = new Image()
+    const url = URL.createObjectURL(file)
+    img.onload = () => {
+      URL.revokeObjectURL(url)
+      if (img.width <= maxWidth) { resolve(file); return }
+      const canvas = document.createElement('canvas')
+      const ratio = maxWidth / img.width
+      canvas.width = maxWidth
+      canvas.height = Math.round(img.height * ratio)
+      canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height)
+      canvas.toBlob(blob => resolve(blob || file), 'image/jpeg', 0.85)
+    }
+    img.onerror = () => resolve(file)
+    img.src = url
   })
 }
 
-async function checkVoteVerdicts() {
-  // Scan localStorage for missed entries that have an excuseId but no verdict yet
-  const pendingExcuses = []
-  for (let i = 1; i <= 30; i++) {
-    const date = dateOffset(getToday(), -i)
-    const stored = localStorage.getItem(`checkin-${date}`)
-    if (!stored) continue
-    const entry = JSON.parse(stored)
-    if (entry.excuseId && entry.emailSent && !entry.verdict) {
-      pendingExcuses.push({ date, excuseId: entry.excuseId, excuse: entry.missedReason })
-    }
-  }
-
-  for (const { date, excuseId, excuse } of pendingExcuses) {
-    const { data: votes, error } = await supabase
-      .from('excuse_votes')
-      .select('vote')
-      .eq('excuse_id', excuseId)
-
-    if (error || !votes) continue
-    if (votes.length < MIN_VOTES_FOR_VERDICT) continue
-
-    const rejects = votes.filter(v => v.vote === 'reject').length
-    const accepts = votes.filter(v => v.vote === 'accept').length
-    const verdict = rejects > accepts ? 'rejected' : 'accepted'
-
-    // Update localStorage with verdict
-    const stored = localStorage.getItem(`checkin-${date}`)
-    if (!stored) continue
-    const entry = JSON.parse(stored)
-    entry.verdict = verdict
-    entry.voteCount = { accepts, rejects, total: votes.length }
-    localStorage.setItem(`checkin-${date}`, JSON.stringify(entry))
-
-    if (verdict === 'rejected' && !entry.shameEmailSent) {
-      // Send shame email to each accountability partner
-      try {
-        for (const email of ACCOUNTABILITY_EMAILS) {
-          await emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_SHAME_TEMPLATE, {
-            to_email: email,
-            missed_date: formatDate(date),
-            excuse_text: excuse,
-            reject_count: rejects,
-            total_votes: votes.length,
-          }, EMAILJS_PUBLIC_KEY)
-        }
-
-        entry.shameEmailSent = true
-        localStorage.setItem(`checkin-${date}`, JSON.stringify(entry))
-      } catch (err) {
-        console.error('Shame email error:', err)
-      }
-    }
-  }
+// ── Progress Ring SVG ──────────────────────────────────────
+function ProgressRing({ percent, size = 24, stroke = 2.5 }) {
+  const r = (size - stroke) / 2
+  const circ = 2 * Math.PI * r
+  const offset = circ - (percent / 100) * circ
+  return (
+    <svg width={size} height={size} className="progress-ring">
+      <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="#1a1a1a" strokeWidth={stroke} />
+      <circle cx={size/2} cy={size/2} r={r} fill="none"
+        stroke={percent >= 70 ? '#4ade80' : percent >= 40 ? '#eab308' : '#ef4444'}
+        strokeWidth={stroke} strokeDasharray={circ} strokeDashoffset={offset}
+        transform={`rotate(-90 ${size/2} ${size/2})`} strokeLinecap="round" />
+    </svg>
+  )
 }
 
-function getPendingPunishment() {
-  for (let i = 1; i <= 30; i++) {
-    const date = dateOffset(getToday(), -i)
-    const stored = localStorage.getItem(`checkin-${date}`)
-    if (!stored) continue
-    const entry = JSON.parse(stored)
-    if (entry.verdict === 'rejected' && !entry.punishmentAcknowledged) {
-      return { date, excuse: entry.missedReason, voteCount: entry.voteCount }
-    }
-  }
-  return null
-}
-
-function App() {
+function App({ userId }) {
   const today = getToday()
-  const [data, setData] = useState(() => loadData(today))
-  const [saved, setSaved] = useState(false)
-  const [missedDate, setMissedDate] = useState(() => checkMissedYesterday())
+  const fileInputRef = useRef(null)
+  const autoSaveTimer = useRef(null)
+  const saveVersion = useRef(0)
+
+  // Core state
+  const [goals, setGoals] = useState([])
+  const [goalWeeklyPct, setGoalWeeklyPct] = useState({})
+  const [partners, setPartners] = useState([])
+  const [checkin, setCheckin] = useState(null)
+  const [goalProgress, setGoalProgress] = useState({}) // { goalId: { completed, proofUrl, proofImagePath } }
+  const [mood, setMoodVal] = useState(0)
+  const [learned, setLearned] = useState('')
+  const [built, setBuilt] = useState('')
+  const [builtLink, setBuiltLink] = useState('')
+  const [uploading, setUploading] = useState(null) // null or goalId being uploaded
+  const [pendingVotes, setPendingVotes] = useState([]) // vote progress for pending excuses
+
+  // Missed day
+  const [missedDate, setMissedDate] = useState(null)
   const [missedReason, setMissedReason] = useState('')
   const [missedAvoidable, setMissedAvoidable] = useState(null)
   const [missedSending, setMissedSending] = useState(false)
-  const [missedError, setMissedError] = useState('')
-  const [showHistory, setShowHistory] = useState(false)
+
+  // Punishment
   const [punishment, setPunishment] = useState(null)
   const [punishmentInput, setPunishmentInput] = useState('')
-  const [verdictChecked, setVerdictChecked] = useState(false)
+
+  // UI
+  const [saveStatus, setSaveStatus] = useState('idle') // idle | saving | saved | error
+  const [loading, setLoading] = useState(true)
   const [toast, setToast] = useState(null)
+  const [showHistory, setShowHistory] = useState(false)
+  const [history, setHistory] = useState([])
+  const [historyPage, setHistoryPage] = useState(0)
+  const [historyHasMore, setHistoryHasMore] = useState(true)
+  const [streak, setStreak] = useState(0)
+  const [completionAvgPct, setCompletionAvgPct] = useState(0)
+  const [last30, setLast30] = useState([])
+  const [collapsed, setCollapsed] = useState({})
+  const [postSubmitUiApplied, setPostSubmitUiApplied] = useState(false)
+  const [isOnline, setIsOnline] = useState(navigator.onLine)
 
   function showToast(message, type = 'success') {
     setToast({ message, type })
     setTimeout(() => setToast(null), 3000)
   }
 
-  // Check vote verdicts on load
+  function toggleCollapse(key) {
+    setCollapsed(prev => ({ ...prev, [key]: !prev[key] }))
+  }
+
+  function openEditSections() {
+    setCollapsed(prev => ({ ...prev, goals: false, mood: false, learned: false, built: false }))
+  }
+
+  // ── Online/Offline ────────────────────────────────────────
   useEffect(() => {
-    checkVoteVerdicts().then(() => {
-      setPunishment(getPendingPunishment())
-      setVerdictChecked(true)
-    }).catch(() => {
-      setVerdictChecked(true)
-    })
+    function onOnline() { setIsOnline(true); flushOfflineQueue() }
+    function onOffline() { setIsOnline(false) }
+    window.addEventListener('online', onOnline)
+    window.addEventListener('offline', onOffline)
+    return () => { window.removeEventListener('online', onOnline); window.removeEventListener('offline', onOffline) }
   }, [])
 
-  useEffect(() => {
-    saveData(today, data)
-  }, [data, today])
+  // ── Load everything ───────────────────────────────────────
+  useEffect(() => { loadAll() }, [])
 
-  function acknowledgePunishment() {
-    if (punishmentInput !== 'I will do better') return
-    const stored = localStorage.getItem(`checkin-${punishment.date}`)
-    if (stored) {
-      const entry = JSON.parse(stored)
-      entry.punishmentAcknowledged = true
-      localStorage.setItem(`checkin-${punishment.date}`, JSON.stringify(entry))
+  async function loadAll() {
+    setLoading(true)
+    if (navigator.onLine) await flushOfflineQueue()
+
+    const [goalsRes, partnersRes, checkinRes, yesterdayRes, missedRes] = await Promise.all([
+      supabase.from('goals').select('*').eq('user_id', userId).eq('active', true).order('created_at'),
+      supabase.from('accountability_partners').select('*').eq('user_id', userId),
+      supabase.from('checkins').select('*').eq('user_id', userId).eq('date', today).maybeSingle(),
+      supabase.from('checkins').select('id').eq('user_id', userId).eq('date', getYesterday()).maybeSingle(),
+      supabase.from('missed_days').select('*').eq('user_id', userId).order('date', { ascending: false }),
+    ])
+
+    const userGoals = goalsRes.data || []
+    const userPartners = partnersRes.data || []
+    setGoals(userGoals)
+    setPartners(userPartners)
+
+    // Load weekly goal completion %
+    if (userGoals.length > 0) {
+      const weekAgo = dateOffset(today, -7)
+      const { data: recentCheckins } = await supabase.from('checkins')
+        .select('id').eq('user_id', userId).gte('date', weekAgo)
+      if (recentCheckins && recentCheckins.length > 0) {
+        const cids = recentCheckins.map(c => c.id)
+        const { data: gp } = await supabase.from('goal_progress')
+          .select('goal_id, completed').in('checkin_id', cids)
+        const pcts = {}
+        for (const g of userGoals) {
+          const entries = (gp || []).filter(p => p.goal_id === g.id)
+          pcts[g.id] = entries.length > 0
+            ? Math.round((entries.filter(e => e.completed).length / Math.max(recentCheckins.length, 1)) * 100)
+            : 0
+        }
+        setGoalWeeklyPct(pcts)
+      }
     }
+
+    // Today's checkin
+    if (checkinRes.data) {
+      const c = checkinRes.data
+      setCheckin(c)
+      setMoodVal(c.mood || 0)
+      setLearned(c.learned || '')
+      setBuilt(c.built || '')
+      setBuiltLink(c.built_link || '')
+      setSaveStatus('saved')
+
+      const { data: gp } = await supabase.from('goal_progress')
+        .select('goal_id, completed, proof_url, proof_image_path').eq('checkin_id', c.id)
+      const progress = {}
+      for (const g of userGoals) progress[g.id] = { completed: false, proofUrl: '', proofImagePath: '' }
+      if (gp) for (const row of gp) progress[row.goal_id] = {
+        completed: row.completed,
+        proofUrl: row.proof_url || '',
+        proofImagePath: row.proof_image_path || '',
+      }
+      setGoalProgress(progress)
+    } else {
+      const progress = {}
+      for (const g of userGoals) progress[g.id] = { completed: false, proofUrl: '', proofImagePath: '' }
+      setGoalProgress(progress)
+    }
+
+    // Check rest days
+    const restDays = JSON.parse(localStorage.getItem(`rest_days_${userId}`) || '[]')
+    const yesterdayDow = new Date(getYesterday()).getDay()
+    const isRestDay = restDays.includes(yesterdayDow)
+
+    // Check if yesterday was missed
+    const missedDays = missedRes.data || []
+    const yesterdayMissed = !yesterdayRes.data
+      && !missedDays.find(m => m.date === getYesterday())
+      && !isRestDay
+    if (yesterdayMissed) setMissedDate(getYesterday())
+
+    await checkVerdicts(missedDays, userPartners)
+    await loadPendingVotes(missedDays, userPartners)
+    await loadStreakAndDots()
+    setLoading(false)
+  }
+
+  async function loadStreakAndDots() {
+    const [checkinsRes, missedRes] = await Promise.all([
+      supabase.from('checkins').select('id, date, mood').eq('user_id', userId)
+        .gte('date', dateOffset(today, -365)).order('date', { ascending: false }),
+      supabase.from('missed_days').select('date').eq('user_id', userId)
+        .gte('date', dateOffset(today, -365)),
+    ])
+
+    const checkins = checkinsRes.data || []
+    let allGoalProgress = []
+    if (checkins.length > 0) {
+      const checkinIds = checkins.map(c => c.id)
+      const { data: gpRows } = await supabase.from('goal_progress')
+        .select('checkin_id, completed, proof_url, proof_image_path')
+        .in('checkin_id', checkinIds)
+      allGoalProgress = gpRows || []
+    }
+
+    const dailyQuality = buildDailyGoalQuality(checkins, allGoalProgress)
+    const qualifiedDates = getQualifiedDateSet(dailyQuality)
+    const recentQualityFrom = dateOffset(today, -29)
+    setCompletionAvgPct(getAverageCompletionPct(dailyQuality, recentQualityFrom))
+
+    const checkinMap = {}
+    for (const c of checkins) checkinMap[c.date] = c.mood
+    const missedDates = new Set((missedRes.data || []).map(m => m.date))
+
+    // Streak (rest days don't break streaks, partial check-ins don't count)
+    const restDays = JSON.parse(localStorage.getItem(`rest_days_${userId}`) || '[]')
+    let s = 0
+    if (qualifiedDates.has(today)) s = 1
+    let d = dateOffset(today, -1)
+    while (true) {
+      const dow = new Date(d).getDay()
+      if (restDays.includes(dow)) { d = dateOffset(d, -1); continue }
+      if (!qualifiedDates.has(d)) break
+      s++; d = dateOffset(d, -1)
+    }
+    setStreak(s)
+
+    // Last 30 — color-coded by mood
+    const dots = []
+    for (let i = 29; i >= 0; i--) {
+      const date = dateOffset(today, -i)
+      const dow = new Date(date).getDay()
+      const isRest = restDays.includes(dow)
+      const moodVal = checkinMap[date]
+      const dayQuality = dailyQuality[date]
+      let status = 'none'
+      let moodLevel = 0
+      if (dayQuality?.qualifies) { status = 'completed'; moodLevel = moodVal }
+      else if (moodVal !== undefined) { status = 'partial'; moodLevel = moodVal }
+      else if (missedDates.has(date)) status = 'missed'
+      else if (isRest) status = 'rest'
+      dots.push({ date, status, moodLevel })
+    }
+    setLast30(dots)
+  }
+
+  async function checkVerdicts(missedDays, userPartners) {
+    const minVotes = Math.max(Math.ceil(userPartners.length / 2), 2)
+    for (const missed of missedDays) {
+      if (missed.verdict) {
+        if (missed.verdict === 'rejected' && !missed.punishment_acknowledged) {
+          setPunishment({ date: missed.date, excuse: missed.excuse, voteCount: { accepts: missed.vote_accepts, rejects: missed.vote_rejects } })
+          return
+        }
+        continue
+      }
+      if (!missed.excuse_id || !missed.email_sent) continue
+      const { data: votes } = await supabase.from('excuse_votes').select('vote').eq('excuse_id', missed.excuse_id)
+      if (!votes || votes.length < minVotes) continue
+      const rejects = votes.filter(v => v.vote === 'reject').length
+      const accepts = votes.filter(v => v.vote === 'accept').length
+      const verdict = rejects > accepts ? 'rejected' : 'accepted'
+      await supabase.from('missed_days').update({ verdict, vote_accepts: accepts, vote_rejects: rejects, vote_total: votes.length }).eq('id', missed.id)
+      if (verdict === 'rejected' && !missed.shame_email_sent) {
+        try {
+          for (const p of userPartners) {
+            await emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_SHAME_TEMPLATE, {
+              to_email: p.email, missed_date: formatDate(missed.date), excuse_text: missed.excuse, reject_count: rejects, total_votes: votes.length,
+            }, EMAILJS_PUBLIC_KEY)
+          }
+          await supabase.from('missed_days').update({ shame_email_sent: true }).eq('id', missed.id)
+        } catch (err) { console.error('Shame email error:', err) }
+        setPunishment({ date: missed.date, excuse: missed.excuse, voteCount: { accepts, rejects } })
+        return
+      }
+    }
+  }
+
+  // ── Load pending vote progress ───────────────────────────
+  async function loadPendingVotes(missedDays, userPartners) {
+    const pending = missedDays.filter(m => m.excuse_id && m.email_sent && !m.verdict)
+    if (pending.length === 0) { setPendingVotes([]); return }
+
+    const results = []
+    for (const m of pending) {
+      const { data: votes } = await supabase.from('excuse_votes')
+        .select('voter_email, vote').eq('excuse_id', m.excuse_id)
+      const voteMap = {}
+      if (votes) for (const v of votes) voteMap[v.voter_email] = v.vote
+
+      const partnerVotes = userPartners.map(p => ({
+        email: p.email,
+        voted: !!voteMap[p.email],
+        vote: voteMap[p.email] || null,
+      }))
+      const accepts = (votes || []).filter(v => v.vote === 'accept').length
+      const rejects = (votes || []).filter(v => v.vote === 'reject').length
+
+      results.push({
+        date: m.date,
+        excuse: m.excuse,
+        excuseId: m.excuse_id,
+        partnerVotes,
+        accepts,
+        rejects,
+        totalVoted: (votes || []).length,
+        totalPartners: userPartners.length,
+      })
+    }
+    setPendingVotes(results)
+  }
+
+  // ── Auto-save with debounce ───────────────────────────────
+  const doSave = useCallback(async () => {
+    const version = ++saveVersion.current
+    setSaveStatus('saving')
+
+    const checkinData = {
+      user_id: userId, date: today, mood,
+      learned: learned.trim(), built: built.trim(),
+      built_link: builtLink.trim() || null,
+    }
+
+    if (!navigator.onLine) {
+      queueOffline({ table: 'checkins', method: 'upsert', data: checkinData, opts: { onConflict: 'user_id,date' } })
+      setSaveStatus('saved')
+      showToast('Saved offline — will sync when back online')
+      return
+    }
+
+    let checkinId = checkin?.id
+    try {
+      if (checkin) {
+        const { error } = await supabase.from('checkins').update(checkinData).eq('id', checkin.id)
+        if (error) throw error
+      } else {
+        const { data, error } = await supabase.from('checkins').insert(checkinData).select().single()
+        if (error) throw error
+        checkinId = data.id
+        setCheckin(data)
+      }
+
+      // Batch upsert goal progress with per-goal proofs
+      const gpRows = Object.entries(goalProgress).map(([goalId, gp]) => ({
+        checkin_id: checkinId, goal_id: goalId,
+        completed: gp.completed,
+        proof_url: gp.proofUrl?.trim() || null,
+        proof_image_path: gp.proofImagePath || null,
+      }))
+      if (gpRows.length > 0) {
+        await supabase.from('goal_progress').upsert(gpRows, { onConflict: 'checkin_id,goal_id' })
+      }
+
+      if (version === saveVersion.current) {
+        setSaveStatus('saved')
+        loadStreakAndDots()
+      }
+    } catch {
+      if (version === saveVersion.current) setSaveStatus('error')
+    }
+  }, [userId, today, mood, learned, built, builtLink, goalProgress, checkin])
+
+  // Trigger auto-save on field changes (debounced 2s)
+  const completedGoalEntries = Object.values(goalProgress).filter(gp => gp.completed)
+  const completedGoalsWithProof = completedGoalEntries.filter(gp => hasGoalProof(gp)).length
+  const hasCompletedWithoutProof = completedGoalEntries.some(gp => !hasGoalProof(gp))
+  const dayCompletionRatio = goals.length > 0 ? completedGoalsWithProof / goals.length : 0
+  const dayCompletionPct = Math.round(dayCompletionRatio * 100)
+  const meetsStreakThreshold = goals.length > 0 && dayCompletionRatio >= STREAK_MIN_COMPLETION_RATIO
+  const isComplete = learned.trim().length >= 50
+    && built.trim().length > 0
+    && completedGoalsWithProof > 0
+    && !hasCompletedWithoutProof
+  const doneForToday = saveStatus === 'saved' && isComplete
+
+  useEffect(() => {
+    if (!doneForToday || postSubmitUiApplied) return
+    setCollapsed(prev => ({ ...prev, goals: true, mood: true, learned: true, built: true }))
+    setPostSubmitUiApplied(true)
+  }, [doneForToday, postSubmitUiApplied])
+
+  useEffect(() => {
+    if (loading) return
+    if (!isComplete) { setSaveStatus('idle'); return }
+    setSaveStatus('idle')
+    clearTimeout(autoSaveTimer.current)
+    autoSaveTimer.current = setTimeout(doSave, 2000)
+    return () => clearTimeout(autoSaveTimer.current)
+  }, [mood, learned, built, builtLink, goalProgress, isComplete, loading, doSave])
+
+  // ── Punishment ────────────────────────────────────────────
+  async function acknowledgePunishment() {
+    if (punishmentInput !== 'I will do better') return
+    await supabase.from('missed_days').update({ punishment_acknowledged: true })
+      .eq('user_id', userId).eq('date', punishment.date)
     setPunishment(null)
     setPunishmentInput('')
   }
 
-  function getStreakBefore(date) {
-    let count = 0
-    let d = dateOffset(date, -1)
-    while (true) {
-      const stored = localStorage.getItem(`checkin-${d}`)
-      if (!stored || !isActiveEntry(JSON.parse(stored))) break
-      count++
-      d = dateOffset(d, -1)
-    }
-    return count
-  }
-
+  // ── Missed day submit ─────────────────────────────────────
   async function handleMissedSubmit() {
     const excuse = missedReason.trim()
     if (excuse.length < 80 || missedAvoidable === null) return
-
     setMissedSending(true)
-    setMissedError('')
 
-    const streakBefore = getStreakBefore(missedDate)
     const excuseId = `${missedDate}-${Date.now()}`
     const encodedExcuse = encodeURIComponent(excuse)
-    const voteLinks = ACCOUNTABILITY_EMAILS.map(email => ({
-      email,
-      accept: `${VOTE_BASE_URL}?id=${excuseId}&email=${encodeURIComponent(email)}&date=${missedDate}&excuse=${encodedExcuse}&vote=accept`,
-      reject: `${VOTE_BASE_URL}?id=${excuseId}&email=${encodeURIComponent(email)}&date=${missedDate}&excuse=${encodedExcuse}&vote=reject`,
-    }))
+
+    const { error: insertErr } = await supabase.from('missed_days').insert({
+      user_id: userId, date: missedDate, excuse, was_avoidable: missedAvoidable, excuse_id: excuseId, email_sent: false,
+    })
+    if (insertErr) { showToast('Failed to save excuse', 'error'); setMissedSending(false); return }
+
+    const { data: recentCheckins } = await supabase.from('checkins').select('id, date')
+      .eq('user_id', userId).lt('date', missedDate).order('date', { ascending: false }).limit(365)
+
+    let streakBefore = 0
+    if (recentCheckins && recentCheckins.length > 0) {
+      const checkinIds = recentCheckins.map(c => c.id)
+      const { data: gpRows } = await supabase.from('goal_progress')
+        .select('checkin_id, completed, proof_url, proof_image_path')
+        .in('checkin_id', checkinIds)
+      const dailyQuality = buildDailyGoalQuality(recentCheckins, gpRows || [])
+      const qualifiedDates = getQualifiedDateSet(dailyQuality)
+      const restDays = JSON.parse(localStorage.getItem(`rest_days_${userId}`) || '[]')
+      let d = dateOffset(missedDate, -1)
+      while (true) {
+        const dow = new Date(d).getDay()
+        if (restDays.includes(dow)) { d = dateOffset(d, -1); continue }
+        if (!qualifiedDates.has(d)) break
+        streakBefore++
+        d = dateOffset(d, -1)
+      }
+    }
 
     try {
-      // Send one email per accountability partner (with personalized vote links)
-      for (const link of voteLinks) {
-        await emailjs.send(
-          EMAILJS_SERVICE_ID,
-          EMAILJS_TEMPLATE_ID,
-          {
-            to_email: link.email,
-            missed_date: formatDate(missedDate),
-            excuse_text: excuse,
-            was_avoidable: missedAvoidable ? 'Yes' : 'No',
-            streak: streakBefore,
-            accept_url: link.accept,
-            reject_url: link.reject,
-          },
-          EMAILJS_PUBLIC_KEY,
-        )
+      for (const p of partners) {
+        const base = `${VOTE_BASE_URL}?id=${excuseId}&email=${encodeURIComponent(p.email)}&date=${missedDate}&excuse=${encodedExcuse}`
+        await emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, {
+          to_email: p.email, missed_date: formatDate(missedDate), excuse_text: excuse,
+          was_avoidable: missedAvoidable ? 'Yes' : 'No', streak: streakBefore,
+          accept_url: base + '&vote=accept', reject_url: base + '&vote=reject',
+        }, EMAILJS_PUBLIC_KEY)
       }
-      saveData(missedDate, {
-        missedReason: excuse,
-        wasAvoidable: missedAvoidable,
-        excuseId,
-        emailSent: true,
-      })
-      showToast(`Excuse sent to ${ACCOUNTABILITY_EMAILS.length} accountability partners`)
-      setMissedDate(null)
-      setMissedReason('')
-      setMissedAvoidable(null)
-    } catch (err) {
-      showToast('Failed to send email. Check your EmailJS config.', 'error')
-      console.error('EmailJS error:', err)
-    } finally {
-      setMissedSending(false)
-    }
+      await supabase.from('missed_days').update({ email_sent: true }).eq('user_id', userId).eq('date', missedDate)
+      showToast(`Excuse sent to ${partners.length} accountability partners`)
+    } catch (err) { showToast('Failed to send emails', 'error'); console.error('EmailJS error:', err) }
+
+    setMissedDate(null); setMissedReason(''); setMissedAvoidable(null); setMissedSending(false)
+    await loadStreakAndDots()
   }
 
-  function toggleBlock(name) {
-    setData(prev => ({
+  // ── Image upload per goal (with resize) ──────────────────
+  const uploadGoalRef = useRef(null) // which goalId triggered upload
+  async function handleGoalImageUpload(e) {
+    const file = e.target.files?.[0]
+    const goalId = uploadGoalRef.current
+    if (!file || !goalId) return
+    if (file.size > 5 * 1024 * 1024) { showToast('Image must be under 5MB', 'error'); return }
+    setUploading(goalId)
+    const resized = await resizeImage(file)
+    const ext = file.name.split('.').pop()
+    const path = `${userId}/${today}-${goalId}-${Date.now()}.${ext}`
+    const { error: uploadErr } = await supabase.storage.from('proof-images').upload(path, resized)
+    if (uploadErr) { showToast('Upload failed: ' + uploadErr.message, 'error'); setUploading(null); return }
+    const { data: urlData } = supabase.storage.from('proof-images').getPublicUrl(path)
+    setGoalProgress(prev => ({
       ...prev,
-      blocks: { ...prev.blocks, [name]: !prev.blocks[name] },
+      [goalId]: { ...prev[goalId], proofImagePath: urlData.publicUrl },
     }))
-    setSaved(false)
+    setUploading(null)
+    showToast('Image uploaded')
+    // Reset input so same file can be re-selected
+    if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
-  function setProblems(val) {
-    const n = Math.max(0, parseInt(val) || 0)
-    setData(prev => ({ ...prev, problemsSolved: n }))
-    setSaved(false)
+  // ── Force save (manual trigger) ───────────────────────────
+  function handleForceSave() {
+    clearTimeout(autoSaveTimer.current)
+    doSave()
   }
 
-  function setMood(level) {
-    setData(prev => ({ ...prev, mood: level }))
-    setSaved(false)
+  // ── Load history (paginated) ──────────────────────────────
+  async function loadHistory(page = 0) {
+    const pageSize = 10
+    const offset = page * pageSize
+    const [checkinsRes, missedRes] = await Promise.all([
+      supabase.from('checkins').select('*').eq('user_id', userId)
+        .order('date', { ascending: false }).range(offset, offset + pageSize - 1),
+      page === 0
+        ? supabase.from('missed_days').select('*').eq('user_id', userId).order('date', { ascending: false }).limit(30)
+        : Promise.resolve({ data: [] }),
+    ])
+
+    const newEntries = []
+    const checkins = checkinsRes.data || []
+    if (checkins.length > 0) {
+      const cids = checkins.map(c => c.id)
+      const { data: allGp } = await supabase.from('goal_progress')
+        .select('checkin_id, goal_id, completed').in('checkin_id', cids)
+      for (const c of checkins) {
+        const gp = (allGp || []).filter(g => g.checkin_id === c.id)
+        newEntries.push({ ...c, type: 'checkin', goalProgress: gp })
+      }
+    }
+    if (page === 0) {
+      for (const m of (missedRes.data || [])) {
+        newEntries.push({ ...m, type: 'missed', date: m.date })
+      }
+    }
+    newEntries.sort((a, b) => b.date.localeCompare(a.date))
+
+    if (page === 0) setHistory(newEntries)
+    else setHistory(prev => [...prev, ...newEntries])
+
+    setHistoryHasMore(checkins.length === pageSize)
+    setHistoryPage(page)
+    setShowHistory(true)
   }
 
-  function updateField(field, value) {
-    setData(prev => ({ ...prev, [field]: value }))
-    setSaved(false)
+  function toggleHistory() {
+    if (showHistory) { setShowHistory(false); return }
+    loadHistory(0)
   }
 
-  const canSave = (data.learned || '').trim().length >= 50
-    && (data.built || '').trim().length > 0
-    && (data.proofUrl || '').trim().length > 0
-
-  function handleSave() {
-    if (!canSave) return
-    saveData(today, data)
-    setSaved(true)
-    showToast('Check-in saved')
-  }
-
-  const completedBlocks = Object.values(data.blocks).filter(Boolean).length
+  // ── Derived ───────────────────────────────────────────────
   const dateDisplay = formatDate(today)
+  const streakThresholdPct = Math.round(STREAK_MIN_COMPLETION_RATIO * 100)
+  const tomorrowDisplay = formatShortDate(dateOffset(today, 1))
 
-  // Punishment screen blocks everything until acknowledged
-  if (!verdictChecked) {
+  // ── Auto-save status label ────────────────────────────────
+  const saveLabel = saveStatus === 'saving' ? 'Saving...'
+    : saveStatus === 'saved' ? (doneForToday ? 'All set for today' : 'Saved')
+    : saveStatus === 'error' ? 'Save failed'
+    : isComplete ? 'Will auto-save' : 'Complete all fields to save'
+
+  // ── Loading ───────────────────────────────────────────────
+  if (loading) {
     return (
       <div className="app">
-        <header>
-          <h1>Daily Dev Check-in</h1>
-          <p className="date">{dateDisplay}</p>
-        </header>
-        <section className="card">
-          <p className="vote-status">Checking accountability verdicts...</p>
-        </section>
+        <header><h1>Daily Check-in</h1><p className="date">{dateDisplay}</p></header>
+        <section className="card"><p className="vote-status">Loading...</p></section>
       </div>
     )
   }
 
+  // ── Punishment ────────────────────────────────────────────
   if (punishment) {
     const inputMatch = punishmentInput === 'I will do better'
     return (
       <div className="app">
-        <header>
-          <h1>Daily Dev Check-in</h1>
-          <p className="date">{dateDisplay}</p>
-        </header>
-
+        <header><h1>Daily Check-in</h1><p className="date">{dateDisplay}</p></header>
         <section className="card punishment-card">
           <h2>Excuse Rejected</h2>
           <p className="punishment-date">{formatDate(punishment.date)}</p>
-
           <div className="punishment-verdict">
             <span className="verdict-reject">{punishment.voteCount?.rejects || 0} Reject</span>
             <span className="verdict-sep">/</span>
             <span className="verdict-accept">{punishment.voteCount?.accepts || 0} Accept</span>
           </div>
-
           <p className="punishment-excuse">"{punishment.excuse}"</p>
-
           <div className="punishment-message">
             <p>Your excuse was rejected by the group.</p>
-            <p>Your friends have been notified.</p>
+            <p>Your partners have been notified.</p>
             <p>You owe a task — check your email.</p>
           </div>
-
           <div className="punishment-gate">
-            <p className="punishment-instruction">
-              Type <strong>I will do better</strong> exactly to continue.
-            </p>
-            <input
-              type="text"
-              className={`field-input punishment-input ${inputMatch ? 'punishment-match' : ''}`}
-              value={punishmentInput}
-              onChange={e => setPunishmentInput(e.target.value)}
-              placeholder="I will do better"
-              spellCheck={false}
-              autoComplete="off"
-            />
-            <button
-              className="save-btn"
-              onClick={acknowledgePunishment}
-              disabled={!inputMatch}
-            >
-              Acknowledge & Continue
-            </button>
+            <p className="punishment-instruction">Type <strong>I will do better</strong> exactly to continue.</p>
+            <input type="text" className={`field-input punishment-input ${inputMatch ? 'punishment-match' : ''}`}
+              value={punishmentInput} onChange={e => setPunishmentInput(e.target.value)}
+              placeholder="I will do better" spellCheck={false} autoComplete="off" />
+            <button className="save-btn" onClick={acknowledgePunishment} disabled={!inputMatch}>Acknowledge & Continue</button>
           </div>
         </section>
       </div>
     )
   }
 
+  // ── Missed day ────────────────────────────────────────────
   if (missedDate) {
     const charCount = missedReason.trim().length
-    const canSubmitExcuse = charCount >= 80 && missedAvoidable !== null && !missedSending
+    const canSubmit = charCount >= 80 && missedAvoidable !== null && !missedSending
     return (
       <div className="app">
-        <header>
-          <h1>Daily Dev Check-in</h1>
-          <p className="date">{dateDisplay}</p>
-        </header>
-
+        <header><h1>Daily Check-in</h1><p className="date">{dateDisplay}</p></header>
         <section className="card missed-card">
           <h2>Missed Day</h2>
           <p className="missed-date">{formatDate(missedDate)}</p>
-          <p className="missed-prompt">
-            You didn't check in yesterday. Write your excuse below.
-            This will be emailed to 6 people who will vote on whether it's acceptable.
-          </p>
-          <textarea
-            className="missed-textarea"
-            placeholder="Be honest. What happened? (at least 80 characters)"
-            value={missedReason}
-            onChange={e => setMissedReason(e.target.value)}
-            rows={5}
-          />
-          <p className={`char-count ${charCount >= 80 ? 'met' : ''}`}>
-            {charCount}/80 characters
-          </p>
-
+          <p className="missed-prompt">You didn't check in yesterday. Write your excuse below. This will be emailed to {partners.length} people who will vote on whether it's acceptable.</p>
+          <textarea className="missed-textarea" placeholder="Be honest. What happened? (at least 80 characters)"
+            value={missedReason} onChange={e => setMissedReason(e.target.value)} rows={5} />
+          <p className={`char-count ${charCount >= 80 ? 'met' : ''}`}>{charCount}/80 characters</p>
           <div className="avoidable-section">
             <p className="avoidable-label">Was this avoidable?</p>
             <div className="avoidable-toggle">
-              <button
-                className={`toggle-btn ${missedAvoidable === true ? 'toggle-active toggle-yes' : ''}`}
-                onClick={() => setMissedAvoidable(true)}
-              >
-                Yes
-              </button>
-              <button
-                className={`toggle-btn ${missedAvoidable === false ? 'toggle-active toggle-no' : ''}`}
-                onClick={() => setMissedAvoidable(false)}
-              >
-                No
-              </button>
+              <button className={`toggle-btn ${missedAvoidable === true ? 'toggle-active toggle-yes' : ''}`} onClick={() => setMissedAvoidable(true)}>Yes</button>
+              <button className={`toggle-btn ${missedAvoidable === false ? 'toggle-active toggle-no' : ''}`} onClick={() => setMissedAvoidable(false)}>No</button>
             </div>
           </div>
-
-          {missedError && <p className="missed-error">{missedError}</p>}
-
-          <button
-            className="save-btn"
-            onClick={handleMissedSubmit}
-            disabled={!canSubmitExcuse}
-          >
+          <button className="save-btn" onClick={handleMissedSubmit} disabled={!canSubmit}>
             {missedSending ? 'Sending...' : 'Submit Excuse & Notify Group'}
           </button>
         </section>
+        {toast && <div className={`toast toast-${toast.type}`}>{toast.message}</div>}
       </div>
     )
   }
 
-  const streak = getStreak(today)
-  const last30 = getLast30Days(today)
-  const history = showHistory ? getAllEntries(today) : []
-
+  // ── Normal check-in ───────────────────────────────────────
   return (
     <div className="app">
+      {!isOnline && <div className="offline-bar">Offline — changes will sync when reconnected</div>}
+
       <header>
-        <h1>Daily Dev Check-in</h1>
+        <h1>Daily Check-in</h1>
         <p className="date">{dateDisplay}</p>
-        {streak > 0 && (
-          <p className="streak">{streak} day streak</p>
-        )}
+        {streak > 0 && <p className="streak">{streak} day streak</p>}
+        <p className="streak-quality">
+          Quality: {completionAvgPct}% avg (30d) | Today: {dayCompletionPct}% ({meetsStreakThreshold ? 'streak-eligible' : `needs ${streakThresholdPct}%`})
+        </p>
       </header>
 
+      {/* Auto-save indicator */}
+      <div className={`autosave-indicator autosave-${saveStatus}`}>{saveLabel}</div>
+
+      {doneForToday && (
+        <section className="card day-done-card">
+          <h2>All Set For Today</h2>
+          <p className="day-done-text">Everything is submitted. Nothing left to do until tomorrow ({tomorrowDisplay}).</p>
+          <p className="day-done-sub">You can still edit anything below and changes will auto-save.</p>
+          <button className="history-toggle day-done-edit" onClick={openEditSections}>Edit Today&apos;s Check-in</button>
+        </section>
+      )}
+
+      {/* 30-Day Dots */}
       <section className="card">
-        <h2>Last 30 Days</h2>
-        <div className="dot-grid">
-          {last30.map(({ date, status }) => (
-            <div
-              key={date}
-              className={`dot dot-${status}`}
-              title={`${formatShortDate(date)}: ${status}`}
-            />
-          ))}
-        </div>
-        <div className="dot-legend">
-          <span><span className="dot dot-completed dot-inline" /> Completed</span>
-          <span><span className="dot dot-missed dot-inline" /> Missed</span>
-          <span><span className="dot dot-none dot-inline" /> No data</span>
-        </div>
+        <h2 className="card-header" onClick={() => toggleCollapse('dots')}>
+          Last 30 Days {collapsed.dots ? '+' : ''}
+        </h2>
+        {!collapsed.dots && (<>
+          <div className="dot-grid">
+            {last30.map(({ date, status, moodLevel }) => (
+              <div key={date}
+                className={`dot ${status === 'completed' ? (moodLevel >= 4 ? 'dot-mood-high' : moodLevel === 3 ? 'dot-mood-mid' : moodLevel >= 1 ? 'dot-mood-low' : 'dot-completed') : `dot-${status}`}`}
+                title={`${formatShortDate(date)}: ${status}${moodLevel ? ` (mood ${moodLevel})` : ''}`} />
+            ))}
+          </div>
+          <div className="dot-legend">
+            <span><span className="dot dot-mood-high dot-inline" /> Good</span>
+            <span><span className="dot dot-mood-mid dot-inline" /> Okay</span>
+            <span><span className="dot dot-mood-low dot-inline" /> Low</span>
+            <span><span className="dot dot-partial dot-inline" /> Partial</span>
+            <span><span className="dot dot-missed dot-inline" /> Missed</span>
+            <span><span className="dot dot-none dot-inline" /> No data</span>
+          </div>
+        </>)}
       </section>
 
-      <section className="card">
-        <h2>Study Blocks</h2>
-        <p className="subtitle">{completedBlocks}/{STUDY_BLOCKS.length} completed</p>
-        <div className="blocks">
-          {STUDY_BLOCKS.map(name => (
-            <label key={name} className={`block ${data.blocks[name] ? 'done' : ''}`}>
-              <input
-                type="checkbox"
-                checked={data.blocks[name]}
-                onChange={() => toggleBlock(name)}
-              />
-              <span className="checkmark" />
-              <span className="block-name">{name}</span>
-            </label>
-          ))}
-        </div>
+      {/* Goals with per-goal proof */}
+      <section className="card card-accent-green">
+        <h2 className="card-header" onClick={() => toggleCollapse('goals')}>
+          Goals <span className="card-header-count">{completedGoalsWithProof}/{goals.length}</span> {collapsed.goals ? '+' : ''}
+        </h2>
+        {!collapsed.goals && (<>
+          <input ref={fileInputRef} type="file" accept="image/*" onChange={handleGoalImageUpload} style={{ display: 'none' }} />
+          {goals.length === 0 ? (
+            <p className="empty-state">No goals yet. Add some in Settings to start tracking.</p>
+          ) : (
+            <div className="blocks">
+              {goals.map(goal => {
+                const gp = goalProgress[goal.id] || { completed: false, proofUrl: '', proofImagePath: '' }
+                return (
+                  <div key={goal.id} className="goal-block">
+                    <label className={`block ${gp.completed ? 'done' : ''}`}>
+                      <input type="checkbox" checked={gp.completed}
+                        onChange={() => setGoalProgress(prev => ({
+                          ...prev,
+                          [goal.id]: { ...prev[goal.id], completed: !prev[goal.id]?.completed },
+                        }))} />
+                      <span className="checkmark" />
+                      <span className="block-name">
+                        {goal.title}
+                        {goal.deadline && <span className="goal-deadline"> (due {goal.deadline})</span>}
+                      </span>
+                      {goalWeeklyPct[goal.id] !== undefined && (
+                        <ProgressRing percent={goalWeeklyPct[goal.id]} />
+                      )}
+                    </label>
+                    {gp.completed && (
+                      <div className="goal-proof">
+                        <input type="url" className="field-input goal-proof-input"
+                          placeholder="Proof URL (commit, deploy, screenshot...)"
+                          value={gp.proofUrl || ''}
+                          onChange={e => setGoalProgress(prev => ({
+                            ...prev,
+                            [goal.id]: { ...prev[goal.id], proofUrl: e.target.value },
+                          }))} />
+                        <div className="goal-proof-actions">
+                          <button className="history-toggle goal-proof-upload"
+                            onClick={() => { uploadGoalRef.current = goal.id; fileInputRef.current?.click() }}
+                            disabled={uploading === goal.id}>
+                            {uploading === goal.id ? 'Uploading...' : gp.proofImagePath ? 'Change Image' : 'Upload Image'}
+                          </button>
+                          {!gp.proofUrl?.trim() && !gp.proofImagePath && (
+                            <span className="goal-proof-hint">Proof required</span>
+                          )}
+                        </div>
+                        {gp.proofImagePath && (
+                          <div className="proof-preview">
+                            <img src={gp.proofImagePath} alt="Proof" className="proof-img" />
+                            <button className="settings-remove proof-remove"
+                              onClick={() => setGoalProgress(prev => ({
+                                ...prev,
+                                [goal.id]: { ...prev[goal.id], proofImagePath: '' },
+                              }))}>x</button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </>)}
       </section>
 
-      <section className="card">
-        <h2>Problems Solved</h2>
-        <div className="problems">
-          <button
-            className="pm-btn"
-            onClick={() => setProblems(data.problemsSolved - 1)}
-            disabled={data.problemsSolved <= 0}
-          >
-            &minus;
-          </button>
-          <input
-            type="number"
-            min="0"
-            value={data.problemsSolved}
-            onChange={e => setProblems(e.target.value)}
-            className="problems-input"
-          />
-          <button
-            className="pm-btn"
-            onClick={() => setProblems(data.problemsSolved + 1)}
-          >
-            +
-          </button>
-        </div>
-      </section>
-
-      <section className="card">
-        <h2>Mood / Energy</h2>
-        {data.mood > 0 && (
-          <p className="mood-current">{MOOD_LABELS[data.mood - 1]}</p>
+      {/* Mood */}
+      <section className="card card-accent-purple">
+        <h2 className="card-header" onClick={() => toggleCollapse('mood')}>
+          Mood / Energy {mood > 0 && <span className="card-header-val">{MOOD_LABELS[mood - 1]}</span>} {collapsed.mood ? '+' : ''}
+        </h2>
+        {!collapsed.mood && (
+          <div className="mood-scale">
+            {MOOD_LABELS.map((label, i) => {
+              const level = i + 1
+              return (
+                <button key={level} className={`mood-btn ${mood === level ? 'active' : ''}`}
+                  onClick={() => setMoodVal(level)} title={label}>
+                  <span className="mood-num">{level}</span>
+                  <span className="mood-label">{label}</span>
+                </button>
+              )
+            })}
+          </div>
         )}
-        <div className="mood-scale">
-          {MOOD_LABELS.map((label, i) => {
-            const level = i + 1
-            return (
-              <button
-                key={level}
-                className={`mood-btn ${data.mood === level ? 'active' : ''}`}
-                onClick={() => setMood(level)}
-                title={label}
-              >
-                <span className="mood-num">{level}</span>
-                <span className="mood-label">{label}</span>
-              </button>
-            )
-          })}
-        </div>
       </section>
 
+      {/* What I Learned */}
       <section className="card">
-        <h2>What I Learned Today</h2>
-        <textarea
-          className="field-textarea"
-          placeholder="What did you learn today? (at least 50 characters)"
-          value={data.learned || ''}
-          onChange={e => updateField('learned', e.target.value)}
-          rows={3}
-        />
-        <p className={`char-count ${(data.learned || '').trim().length >= 50 ? 'met' : ''}`}>
-          {(data.learned || '').trim().length}/50 characters
-        </p>
+        <h2 className="card-header" onClick={() => toggleCollapse('learned')}>
+          What I Learned Today {collapsed.learned ? '+' : ''}
+        </h2>
+        {!collapsed.learned && (<>
+          <textarea className="field-textarea"
+            placeholder={goals.length === 0 ? 'Start by adding goals in Settings, then describe what you learned here...' : 'What did you learn today? (at least 50 characters)'}
+            value={learned} onChange={e => setLearned(e.target.value)} rows={3} />
+          <p className={`char-count ${learned.trim().length >= 50 ? 'met' : ''}`}>{learned.trim().length}/50 characters</p>
+        </>)}
       </section>
 
+      {/* What I Built */}
       <section className="card">
-        <h2>What I Built / Wrote</h2>
-        <textarea
-          className="field-textarea"
-          placeholder="Describe what you built or wrote today..."
-          value={data.built || ''}
-          onChange={e => updateField('built', e.target.value)}
-          rows={3}
-        />
-        <input
-          type="url"
-          className="field-input"
-          placeholder="GitHub link (optional)"
-          value={data.builtLink || ''}
-          onChange={e => updateField('builtLink', e.target.value)}
-        />
+        <h2 className="card-header" onClick={() => toggleCollapse('built')}>
+          What I Built / Wrote {collapsed.built ? '+' : ''}
+        </h2>
+        {!collapsed.built && (<>
+          <textarea className="field-textarea" placeholder="Describe what you built or wrote today..."
+            value={built} onChange={e => setBuilt(e.target.value)} rows={3} />
+          <input type="url" className="field-input" placeholder="GitHub link (optional)"
+            value={builtLink} onChange={e => setBuiltLink(e.target.value)} />
+        </>)}
       </section>
 
-      <section className="card">
-        <h2>Proof of Work</h2>
-        <input
-          type="url"
-          className="field-input"
-          placeholder="Commit URL, deployed link, or any proof..."
-          value={data.proofUrl || ''}
-          onChange={e => updateField('proofUrl', e.target.value)}
-        />
-      </section>
+      {/* Vote Progress */}
+      {pendingVotes.length > 0 && (
+        <section className="card card-accent-vote">
+          <h2 className="card-header" onClick={() => toggleCollapse('votes')}>
+            Pending Votes ({pendingVotes.length}) {collapsed.votes ? '+' : ''}
+          </h2>
+          {!collapsed.votes && (
+            <div className="vote-progress-list">
+              {pendingVotes.map(pv => (
+                <div key={pv.excuseId} className="vote-progress-item">
+                  <div className="vote-progress-header">
+                    <span className="vote-progress-date">{formatShortDate(pv.date)}</span>
+                    <span className="vote-progress-tally">
+                      <span className="vote-tally-accept">{pv.accepts}</span>
+                      <span className="vote-tally-sep">/</span>
+                      <span className="vote-tally-reject">{pv.rejects}</span>
+                      <span className="vote-tally-total">({pv.totalVoted}/{pv.totalPartners} voted)</span>
+                    </span>
+                  </div>
+                  <p className="vote-progress-excuse">"{pv.excuse.length > 100 ? pv.excuse.slice(0, 100) + '...' : pv.excuse}"</p>
+                  <div className="vote-progress-partners">
+                    {pv.partnerVotes.map(p => (
+                      <span key={p.email} className={`vote-partner-chip ${p.voted ? (p.vote === 'accept' ? 'chip-accept' : 'chip-reject') : 'chip-waiting'}`}>
+                        {p.email.split('@')[0]}
+                        {p.voted ? (p.vote === 'accept' ? ' ✓' : ' ✗') : ' ...'}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
 
-      <button className="save-btn" onClick={handleSave} disabled={!canSave}>
-        {saved ? 'Saved!' : 'Save Check-in'}
-      </button>
+      {/* Manual save fallback */}
+      {isComplete && saveStatus !== 'saved' && saveStatus !== 'saving' && (
+        <button className="save-btn" onClick={handleForceSave}>Save Now</button>
+      )}
 
-      <button
-        className="history-toggle"
-        onClick={() => setShowHistory(v => !v)}
-      >
+      {/* History */}
+      <button className="history-toggle" onClick={toggleHistory}>
         {showHistory ? 'Hide History' : 'View History'}
       </button>
 
       {showHistory && (
         <section className="card history-card">
           <h2>History</h2>
-          {history.length === 0 && (
-            <p className="history-empty">No entries yet.</p>
-          )}
+          {history.length === 0 && <p className="empty-state">No entries yet. Complete your first check-in to start building history.</p>}
           {history.map(entry => (
-            <div key={entry.date} className={`history-entry ${entry.missedReason ? 'history-missed' : ''}`}>
+            <div key={`${entry.type}-${entry.date}`} className={`history-entry ${entry.type === 'missed' ? 'history-missed' : ''}`}>
               <div className="history-header">
                 <span className="history-date">{formatDate(entry.date)}</span>
-                {entry.missedReason && <span className="history-badge badge-missed">Missed</span>}
-                {!entry.missedReason && <span className="history-badge badge-done">Completed</span>}
+                {entry.type === 'missed'
+                  ? <span className="history-badge badge-missed">Missed</span>
+                  : <span className="history-badge badge-done">Completed</span>}
               </div>
-              {entry.missedReason ? (
-                <p className="history-reason">{entry.missedReason}</p>
+              {entry.type === 'missed' ? (
+                <p className="history-reason">{entry.excuse}</p>
               ) : (
                 <div className="history-details">
-                  <span>
-                    {entry.blocks ? Object.entries(entry.blocks).filter(([, v]) => v).map(([k]) => k).join(', ') || 'No blocks' : 'No blocks'}
-                  </span>
-                  <span>{entry.problemsSolved || 0} problems</span>
+                  {entry.goalProgress && entry.goalProgress.length > 0 && (
+                    <span>{entry.goalProgress.filter(g => g.completed).length}/{entry.goalProgress.length} goals</span>
+                  )}
                   <span>{entry.mood > 0 ? MOOD_LABELS[entry.mood - 1] : 'No mood'}</span>
                   {entry.learned && <span className="history-learned">{entry.learned}</span>}
                   {entry.built && <span className="history-built">{entry.built}</span>}
-                  {entry.proofUrl && <a className="history-link" href={entry.proofUrl} target="_blank" rel="noopener noreferrer">{entry.proofUrl}</a>}
+                  {entry.proof_url && <a className="history-link" href={entry.proof_url} target="_blank" rel="noopener noreferrer">{entry.proof_url}</a>}
+                  {entry.proof_image_path && <img src={entry.proof_image_path} alt="Proof" className="history-proof-img" />}
                 </div>
               )}
             </div>
           ))}
+          {historyHasMore && (
+            <button className="history-toggle" style={{ marginTop: '0.5rem' }} onClick={() => loadHistory(historyPage + 1)}>
+              Load More
+            </button>
+          )}
         </section>
       )}
 
-      {toast && (
-        <div className={`toast toast-${toast.type}`}>
-          {toast.message}
-        </div>
-      )}
+      {toast && <div className={`toast toast-${toast.type}`}>{toast.message}</div>}
     </div>
   )
 }

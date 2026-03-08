@@ -1,0 +1,283 @@
+import { useState, useEffect } from 'react'
+import { supabase } from './supabase.js'
+
+const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+
+function SettingsPage({ userId, onSetupComplete, onSkip }) {
+  const [goals, setGoals] = useState([])
+  const [partners, setPartners] = useState([])
+  const [newGoal, setNewGoal] = useState('')
+  const [newDeadline, setNewDeadline] = useState('')
+  const [newPartner, setNewPartner] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  // Rest days
+  const [restDays, setRestDays] = useState([])
+
+  // Notification reminder
+  const [reminderHour, setReminderHour] = useState(21)
+  const [notifPermission, setNotifPermission] = useState(
+    typeof Notification !== 'undefined' ? Notification.permission : 'denied'
+  )
+
+  useEffect(() => {
+    loadData()
+  }, [])
+
+  async function loadData() {
+    setLoading(true)
+    const [goalsRes, partnersRes] = await Promise.all([
+      supabase.from('goals').select('*').eq('user_id', userId).eq('active', true).order('created_at'),
+      supabase.from('accountability_partners').select('*').eq('user_id', userId).order('created_at'),
+    ])
+    if (goalsRes.data) setGoals(goalsRes.data)
+    if (partnersRes.data) setPartners(partnersRes.data)
+
+    // Load rest days from localStorage
+    const stored = JSON.parse(localStorage.getItem(`rest_days_${userId}`) || '[]')
+    setRestDays(stored)
+
+    // Load reminder hour
+    const hour = parseInt(localStorage.getItem(`reminder_hour_${userId}`) || '21', 10)
+    setReminderHour(hour)
+
+    setLoading(false)
+  }
+
+  async function addGoal() {
+    const title = newGoal.trim()
+    if (!title) return
+    setSaving(true)
+    setError('')
+    const { data, error: err } = await supabase
+      .from('goals')
+      .insert({ user_id: userId, title, deadline: newDeadline || null })
+      .select()
+      .single()
+    if (err) {
+      setError(err.message)
+    } else {
+      setGoals(prev => [...prev, data])
+      setNewGoal('')
+      setNewDeadline('')
+    }
+    setSaving(false)
+  }
+
+  async function removeGoal(id) {
+    await supabase.from('goals').update({ active: false }).eq('id', id)
+    setGoals(prev => prev.filter(g => g.id !== id))
+  }
+
+  async function addPartner() {
+    const email = newPartner.trim().toLowerCase()
+    if (!email || !email.includes('@')) return
+    setSaving(true)
+    setError('')
+    const { data, error: err } = await supabase
+      .from('accountability_partners')
+      .insert({ user_id: userId, email })
+      .select()
+      .single()
+    if (err) {
+      if (err.code === '23505') setError('Partner already added')
+      else setError(err.message)
+    } else {
+      setPartners(prev => [...prev, data])
+      setNewPartner('')
+    }
+    setSaving(false)
+  }
+
+  async function removePartner(id) {
+    await supabase.from('accountability_partners').delete().eq('id', id)
+    setPartners(prev => prev.filter(p => p.id !== id))
+  }
+
+  function toggleRestDay(day) {
+    setRestDays(prev => {
+      const next = prev.includes(day) ? prev.filter(d => d !== day) : [...prev, day]
+      localStorage.setItem(`rest_days_${userId}`, JSON.stringify(next))
+      return next
+    })
+  }
+
+  function handleReminderHour(val) {
+    const h = Math.max(0, Math.min(23, parseInt(val, 10) || 0))
+    setReminderHour(h)
+    localStorage.setItem(`reminder_hour_${userId}`, h.toString())
+  }
+
+  async function requestNotifPermission() {
+    if (typeof Notification === 'undefined') return
+    const result = await Notification.requestPermission()
+    setNotifPermission(result)
+  }
+
+  const isSetupDone = goals.length >= 1 && partners.length >= 3
+
+  if (loading) {
+    return (
+      <div className="app">
+        <section className="card">
+          <p className="vote-status">Loading settings...</p>
+        </section>
+      </div>
+    )
+  }
+
+  return (
+    <div className="app">
+      <header>
+        <h1>Settings</h1>
+        <p className="date">Set up your goals and accountability partners</p>
+      </header>
+
+      <section className="card card-accent-green">
+        <h2>Goals ({goals.length})</h2>
+        <p className="subtitle">What are you working toward? Add at least 1.</p>
+
+        <div className="settings-list">
+          {goals.map(goal => (
+            <div key={goal.id} className="settings-item">
+              <div className="settings-item-info">
+                <span className="settings-item-name">{goal.title}</span>
+                {goal.deadline && (
+                  <span className="settings-item-sub">due {goal.deadline}</span>
+                )}
+              </div>
+              <button className="settings-remove" onClick={() => removeGoal(goal.id)}>x</button>
+            </div>
+          ))}
+        </div>
+
+        <div className="settings-add">
+          <input
+            type="text"
+            className="field-input"
+            placeholder="Goal title (e.g., Learn Rust, Build portfolio)"
+            value={newGoal}
+            onChange={e => setNewGoal(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && addGoal()}
+          />
+          <input
+            type="text"
+            className="field-input settings-date-input"
+            placeholder="Deadline (YYYY-MM-DD)"
+            value={newDeadline}
+            onChange={e => setNewDeadline(e.target.value)}
+            pattern="\d{4}-\d{2}-\d{2}"
+            maxLength={10}
+          />
+          <button className="save-btn settings-add-btn" onClick={addGoal} disabled={saving || !newGoal.trim()}>
+            Add Goal
+          </button>
+        </div>
+      </section>
+
+      <section className="card">
+        <h2>Accountability Partners ({partners.length})</h2>
+        <p className="subtitle">
+          People who will vote on your excuses. Minimum 3 required.
+        </p>
+
+        <div className="settings-list">
+          {partners.map(p => (
+            <div key={p.id} className="settings-item">
+              <span className="settings-item-name">{p.email}</span>
+              <button className="settings-remove" onClick={() => removePartner(p.id)}>x</button>
+            </div>
+          ))}
+        </div>
+
+        <div className="settings-add">
+          <input
+            type="email"
+            className="field-input"
+            placeholder="Partner's email"
+            value={newPartner}
+            onChange={e => setNewPartner(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && addPartner()}
+          />
+          <button className="save-btn settings-add-btn" onClick={addPartner} disabled={saving || !newPartner.trim()}>
+            Add Partner
+          </button>
+        </div>
+      </section>
+
+      <section className="card">
+        <h2>Rest Days</h2>
+        <p className="subtitle">
+          Select days you take off. Rest days won't break your streak or trigger missed-day excuses.
+        </p>
+        <div className="rest-day-grid">
+          {DAY_NAMES.map((name, i) => (
+            <button
+              key={i}
+              className={`rest-day-btn ${restDays.includes(i) ? 'rest-day-active' : ''}`}
+              onClick={() => toggleRestDay(i)}
+            >
+              {name}
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <section className="card card-accent-purple">
+        <h2>Notifications</h2>
+        <p className="subtitle">Get a browser reminder if you haven't checked in by a certain hour.</p>
+
+        {notifPermission === 'granted' ? (
+          <div className="notif-settings">
+            <label className="notif-label">
+              Remind me after
+              <input
+                type="number"
+                className="field-input notif-hour-input"
+                min={0}
+                max={23}
+                value={reminderHour}
+                onChange={e => handleReminderHour(e.target.value)}
+              />
+              :00
+            </label>
+            <p className="settings-item-sub">
+              You'll get a notification if you haven't checked in by {reminderHour}:00.
+            </p>
+          </div>
+        ) : notifPermission === 'denied' ? (
+          <p className="empty-state">
+            Notifications are blocked. Enable them in your browser settings to use reminders.
+          </p>
+        ) : (
+          <button className="save-btn" onClick={requestNotifPermission}>
+            Enable Browser Notifications
+          </button>
+        )}
+      </section>
+
+      {error && <p className="missed-error">{error}</p>}
+
+      {onSetupComplete && (
+        <>
+          <button
+            className="save-btn"
+            disabled={!isSetupDone}
+            onClick={onSetupComplete}
+          >
+            {isSetupDone ? 'Continue to Check-in' : `Need ${goals.length < 1 ? 'at least 1 goal' : ''}${goals.length < 1 && partners.length < 3 ? ' and ' : ''}${partners.length < 3 ? `${3 - partners.length} more partner${3 - partners.length > 1 ? 's' : ''}` : ''}`}
+          </button>
+          {onSkip && !isSetupDone && (
+            <button className="history-toggle" onClick={onSkip} style={{ marginTop: '0.5rem' }}>
+              Skip for now — I'll set up later
+            </button>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
+export default SettingsPage
