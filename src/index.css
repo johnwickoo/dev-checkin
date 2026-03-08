@@ -4,6 +4,14 @@
   box-sizing: border-box;
 }
 
+:root {
+  color-scheme: dark;
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+}
+
 body {
   font-family: 'JetBrains Mono', 'SF Mono', 'Fira Code', 'Cascadia Code', Menlo, Consolas, 'Liberation Mono', monospace;
   background: #0a0a0a;
@@ -19,9 +27,14 @@ body {
   line-height: 1.5;
 }
 
+body[data-theme='light'] {
+  background: linear-gradient(180deg, #f7fafc 0%, #eef3f8 100%);
+  color: #1f2a37;
+}
+
 #root {
   width: 100%;
-  max-width: 480px;
+  max-width: 560px;
 }
 
 @media (max-width: 480px) {

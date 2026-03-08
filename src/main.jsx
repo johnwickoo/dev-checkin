@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components */
 import { StrictMode, useState, useEffect, lazy, Suspense } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
@@ -8,6 +9,7 @@ import { supabase } from './supabase.js'
 const StatsPage = lazy(() => import('./StatsPage.jsx'))
 const SettingsPage = lazy(() => import('./SettingsPage.jsx'))
 const VotePage = lazy(() => import('./VotePage.jsx'))
+const THEME_STORAGE_KEY = 'ui_theme_mode'
 
 function toDateKey(date) {
   const y = date.getFullYear()
@@ -22,6 +24,20 @@ function LoadingFallback() {
       <section className="card"><p className="vote-status">Loading...</p></section>
     </div>
   )
+}
+
+function getPreferredTheme() {
+  const stored = localStorage.getItem(THEME_STORAGE_KEY)
+  if (stored === 'light' || stored === 'dark') return stored
+  if (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) {
+    return 'light'
+  }
+  return 'dark'
+}
+
+function applyTheme(theme) {
+  document.documentElement.setAttribute('data-theme', theme)
+  document.body.setAttribute('data-theme', theme)
 }
 
 function LoginPage() {
@@ -67,13 +83,14 @@ function LoginPage() {
   )
 }
 
-function TabNav({ tab, setTab, onLogout }) {
+function TabNav({ tab, setTab }) {
   return (
     <nav className="tab-nav">
-      <button className={`tab-btn ${tab === 'checkin' ? 'tab-active' : ''}`} onClick={() => setTab('checkin')}>Check-in</button>
-      <button className={`tab-btn ${tab === 'stats' ? 'tab-active' : ''}`} onClick={() => setTab('stats')}>Stats</button>
-      <button className={`tab-btn ${tab === 'settings' ? 'tab-active' : ''}`} onClick={() => setTab('settings')}>Settings</button>
-      <button className="tab-btn tab-logout" onClick={onLogout}>Log out</button>
+      <div className="tab-row">
+        <button className={`tab-btn ${tab === 'checkin' ? 'tab-active' : ''}`} onClick={() => setTab('checkin')}>Check-in</button>
+        <button className={`tab-btn ${tab === 'stats' ? 'tab-active' : ''}`} onClick={() => setTab('stats')}>Stats</button>
+        <button className={`tab-btn ${tab === 'settings' ? 'tab-active' : ''}`} onClick={() => setTab('settings')}>Settings</button>
+      </div>
     </nav>
   )
 }
@@ -101,13 +118,29 @@ function Main() {
   const [tab, setTab] = useState('checkin')
   const [session, setSession] = useState(undefined)
   const [setupDone, setSetupDone] = useState(undefined)
-  const [setupSkipped, setSetupSkipped] = useState(false)
+  const [visitedTabs, setVisitedTabs] = useState({ checkin: true, stats: false, settings: false })
+  const [theme, setTheme] = useState(getPreferredTheme)
+
+  async function checkSetup(userId) {
+    const [goalsRes, partnersRes] = await Promise.all([
+      supabase.from('goals').select('id').eq('user_id', userId).limit(1),
+      supabase.from('accountability_partners').select('id').eq('user_id', userId).limit(3),
+    ])
+    const hasGoals = (goalsRes.data || []).length >= 1
+    const hasPartners = (partnersRes.data || []).length >= 3
+    setSetupDone(hasGoals && hasPartners)
+  }
+
+  useEffect(() => {
+    applyTheme(theme)
+    localStorage.setItem(THEME_STORAGE_KEY, theme)
+  }, [theme])
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session: s } }) => setSession(s))
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, s) => {
       setSession(s)
-      if (!s) { setSetupDone(undefined); setSetupSkipped(false) }
+      if (!s) setSetupDone(undefined)
     })
     return () => subscription.unsubscribe()
   }, [])
@@ -117,28 +150,24 @@ function Main() {
     const userId = session.user.id
     checkSetup(userId)
     // Check notification reminder
-    try { checkNotificationReminder(userId) } catch {}
+    try {
+      checkNotificationReminder(userId)
+    } catch (err) {
+      console.error('Notification reminder check failed:', err)
+    }
   }, [session])
 
-  async function checkSetup(userId) {
-    const [goalsRes, partnersRes] = await Promise.all([
-      supabase.from('goals').select('id').eq('user_id', userId).eq('active', true).limit(1),
-      supabase.from('accountability_partners').select('id').eq('user_id', userId).limit(3),
-    ])
-    const hasGoals = (goalsRes.data || []).length >= 1
-    const hasPartners = (partnersRes.data || []).length >= 3
-    setSetupDone(hasGoals && hasPartners)
+  useEffect(() => {
+    setVisitedTabs(prev => (prev[tab] ? prev : { ...prev, [tab]: true }))
+  }, [tab])
 
-    // Check if user skipped before (allow 3 days grace)
-    const skipTs = localStorage.getItem(`setup_skipped_${userId}`)
-    if (skipTs) {
-      const daysAgo = (Date.now() - parseInt(skipTs, 10)) / 86400000
-      if (daysAgo < 3) setSetupSkipped(true)
-      else localStorage.removeItem(`setup_skipped_${userId}`)
-    }
-  }
+  useEffect(() => {
+    if (!session?.user?.id) return
+    setTab('checkin')
+    setVisitedTabs({ checkin: true, stats: false, settings: false })
+  }, [session?.user?.id])
 
-  if (session === undefined || (session && setupDone === undefined && !setupSkipped)) {
+  if (session === undefined || (session && setupDone === undefined)) {
     return (
       <div className="app">
         <header><h1>Daily Check-in</h1></header>
@@ -153,35 +182,50 @@ function Main() {
 
   async function handleLogout() { await supabase.auth.signOut() }
 
-  function handleSkipSetup() {
-    localStorage.setItem(`setup_skipped_${userId}`, Date.now().toString())
-    setSetupSkipped(true)
-  }
-
-  // Onboarding — needs setup (but can skip)
-  if (setupDone === false && !setupSkipped) {
+  // Onboarding — strict setup required
+  if (setupDone === false) {
     return (
       <Suspense fallback={<LoadingFallback />}>
         <SettingsPage userId={userId}
-          onSetupComplete={() => { setSetupDone(true); setTab('checkin') }}
-          onSkip={handleSkipSetup} />
+          theme={theme}
+          onToggleTheme={() => setTheme(prev => prev === 'dark' ? 'light' : 'dark')}
+          onLogout={handleLogout}
+          onSetupComplete={() => { setSetupDone(true); setTab('checkin') }} />
       </Suspense>
     )
   }
 
   return (
-    <>
-      <TabNav tab={tab} setTab={setTab} onLogout={handleLogout} />
+    <div className="main-shell">
+      <TabNav tab={tab} setTab={setTab} />
       <Suspense fallback={<LoadingFallback />}>
-        {tab === 'checkin' && <App userId={userId} />}
-        {tab === 'stats' && <StatsPage userId={userId} />}
-        {tab === 'settings' && <SettingsPage userId={userId} />}
+        {visitedTabs.checkin && (
+          <div className={`tab-panel ${tab === 'checkin' ? 'tab-panel-active' : 'tab-panel-hidden'}`}>
+            <App userId={userId} />
+          </div>
+        )}
+        {visitedTabs.stats && (
+          <div className={`tab-panel ${tab === 'stats' ? 'tab-panel-active' : 'tab-panel-hidden'}`}>
+            <StatsPage userId={userId} />
+          </div>
+        )}
+        {visitedTabs.settings && (
+          <div className={`tab-panel ${tab === 'settings' ? 'tab-panel-active' : 'tab-panel-hidden'}`}>
+            <SettingsPage
+              userId={userId}
+              theme={theme}
+              onToggleTheme={() => setTheme(prev => prev === 'dark' ? 'light' : 'dark')}
+              onLogout={handleLogout}
+            />
+          </div>
+        )}
       </Suspense>
-    </>
+    </div>
   )
 }
 
 function Router() {
+  useEffect(() => { applyTheme(getPreferredTheme()) }, [])
   const path = window.location.pathname
   if (path === '/vote') return <Suspense fallback={<LoadingFallback />}><VotePage /></Suspense>
   return <Main />

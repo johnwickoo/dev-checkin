@@ -8,6 +8,8 @@ import {
   buildDailyGoalQuality,
   getQualifiedDateSet,
   getAverageCompletionPct,
+  getLatestDate,
+  getConsecutiveStreakFromDate,
 } from './streakUtils.js'
 import './App.css'
 
@@ -45,6 +47,13 @@ function dateOffset(dateStr, offset) {
   return toDateKey(dt)
 }
 
+function isDateKey(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
+  const [y, m, d] = value.split('-').map(Number)
+  const dt = new Date(y, m - 1, d)
+  return toDateKey(dt) === value
+}
+
 function formatDate(dateStr) {
   const [y, m, d] = dateStr.split('-').map(Number)
   return new Date(y, m - 1, d).toLocaleDateString('en-US', {
@@ -55,6 +64,10 @@ function formatDate(dateStr) {
 function formatShortDate(dateStr) {
   const [y, m, d] = dateStr.split('-').map(Number)
   return new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+}
+
+function formatGoalDeadlineLabel(goalTitle, deadline) {
+  return `Missed goal deadline: "${goalTitle}" (due ${formatDate(deadline)})`
 }
 
 function toIsoInHours(hours) {
@@ -253,6 +266,11 @@ function App({ userId }) {
   const [missedReason, setMissedReason] = useState('')
   const [missedAvoidable, setMissedAvoidable] = useState(null)
   const [missedSending, setMissedSending] = useState(false)
+  const [deadlineIssue, setDeadlineIssue] = useState(null)
+  const [deadlineReason, setDeadlineReason] = useState('')
+  const [deadlineAvoidable, setDeadlineAvoidable] = useState(null)
+  const [deadlineExtensionDate, setDeadlineExtensionDate] = useState('')
+  const [deadlineSending, setDeadlineSending] = useState(false)
 
   // Punishment
   const [punishment, setPunishment] = useState(null)
@@ -268,10 +286,19 @@ function App({ userId }) {
   const [historyHasMore, setHistoryHasMore] = useState(true)
   const [streak, setStreak] = useState(0)
   const [verifiedStreak, setVerifiedStreak] = useState(0)
+  const [streakPaused, setStreakPaused] = useState(false)
   const [completionAvgPct, setCompletionAvgPct] = useState(0)
   const [verifiedAvgPct, setVerifiedAvgPct] = useState(0)
   const [last30, setLast30] = useState([])
-  const [collapsed, setCollapsed] = useState({})
+  const [collapsed, setCollapsed] = useState({
+    dots: true,
+    votes: true,
+    mood: false,
+    learned: false,
+    built: false,
+    goals: false,
+  })
+  const [showHeaderDetails, setShowHeaderDetails] = useState(false)
   const [postSubmitUiApplied, setPostSubmitUiApplied] = useState(false)
   const [isOnline, setIsOnline] = useState(navigator.onLine)
 
@@ -286,6 +313,40 @@ function App({ userId }) {
 
   function openEditSections() {
     setCollapsed(prev => ({ ...prev, goals: false, mood: false, learned: false, built: false }))
+  }
+
+  function getSuggestedExtensionDate(deadline) {
+    const minDate = dateOffset(today, 1)
+    if (!deadline) return minDate
+    const oneWeekAfterDeadline = dateOffset(deadline, 7)
+    return oneWeekAfterDeadline > minDate ? oneWeekAfterDeadline : minDate
+  }
+
+  async function createVoteInviteLinks({ sourceType, sourceId, excuseId, missedDate, excuseText, emails }) {
+    const normalizedEmails = [...new Set(
+      (emails || [])
+        .map(email => String(email || '').trim().toLowerCase())
+        .filter(Boolean),
+    )]
+    if (normalizedEmails.length === 0) return {}
+
+    const { data, error } = await supabase.rpc('create_excuse_vote_invites', {
+      p_source_type: sourceType,
+      p_source_id: sourceId,
+      p_excuse_id: excuseId,
+      p_missed_date: missedDate,
+      p_excuse_text: excuseText,
+      p_voter_emails: normalizedEmails,
+    })
+    if (error) throw error
+
+    const tokenByEmail = {}
+    for (const row of (data || [])) {
+      const email = String(row?.voter_email || '').trim().toLowerCase()
+      const token = String(row?.token || '').trim()
+      if (email && token) tokenByEmail[email] = token
+    }
+    return tokenByEmail
   }
 
   // ── Online/Offline ────────────────────────────────────────
@@ -304,12 +365,13 @@ function App({ userId }) {
     setLoading(true)
     if (navigator.onLine) await flushOfflineQueue()
 
-    const [goalsRes, partnersRes, checkinRes, yesterdayRes, missedRes] = await Promise.all([
+    const [goalsRes, partnersRes, checkinRes, yesterdayRes, missedRes, deadlineMissRes] = await Promise.all([
       supabase.from('goals').select('*').eq('user_id', userId).eq('active', true).order('created_at'),
       supabase.from('accountability_partners').select('*').eq('user_id', userId),
       supabase.from('checkins').select('*').eq('user_id', userId).eq('date', today).maybeSingle(),
       supabase.from('checkins').select('id').eq('user_id', userId).eq('date', getYesterday()).maybeSingle(),
       supabase.from('missed_days').select('*').eq('user_id', userId).order('date', { ascending: false }),
+      supabase.from('missed_goal_deadlines').select('*').eq('user_id', userId).order('deadline', { ascending: false }),
     ])
 
     const userGoals = goalsRes.data || []
@@ -401,23 +463,49 @@ function App({ userId }) {
 
     // Check if yesterday was missed
     const missedDays = missedRes.data || []
-    const yesterdayMissed = !yesterdayRes.data
+    const deadlineMisses = deadlineMissRes.data || []
+    const yesterdayMissed = userGoals.length > 0
+      && !yesterdayRes.data
       && !missedDays.find(m => m.date === getYesterday())
       && !isRestDay
     if (yesterdayMissed) setMissedDate(getYesterday())
+    else setMissedDate(null)
 
-    await checkVerdicts(missedDays, userPartners)
-    await loadPendingVotes(missedDays, userPartners)
-    await loadStreakAndDots()
+    const overdueGoals = userGoals
+      .filter(g => g.deadline && g.deadline < today)
+      .sort((a, b) => a.deadline.localeCompare(b.deadline))
+    const deadlineMissedKeys = new Set(deadlineMisses.map(m => `${m.goal_id}:${m.deadline}`))
+    const nextDeadlineIssue = overdueGoals.find(g => !deadlineMissedKeys.has(`${g.id}:${g.deadline}`))
+
+    const hasDeadlinePunishment = await checkDeadlineVerdicts(deadlineMisses, userPartners, userGoals)
+    const hasMissedDayPunishment = hasDeadlinePunishment ? false : await checkVerdicts(missedDays, userPartners)
+
+    if (!hasDeadlinePunishment && !hasMissedDayPunishment) setPunishment(null)
+
+    if (nextDeadlineIssue && !hasDeadlinePunishment) {
+      setDeadlineIssue({ goalId: nextDeadlineIssue.id, title: nextDeadlineIssue.title, deadline: nextDeadlineIssue.deadline })
+      setDeadlineExtensionDate(getSuggestedExtensionDate(nextDeadlineIssue.deadline))
+    } else {
+      setDeadlineIssue(null)
+      setDeadlineReason('')
+      setDeadlineAvoidable(null)
+      setDeadlineExtensionDate('')
+      setDeadlineSending(false)
+    }
+
+    await loadPendingVotes(missedDays, deadlineMisses, userPartners, userGoals)
+    await loadStreakAndDots(userGoals.length)
     setLoading(false)
   }
 
-  async function loadStreakAndDots() {
-    const [checkinsRes, missedRes] = await Promise.all([
+  async function loadStreakAndDots(activeGoalCount = goals.length) {
+    const [checkinsRes, missedRes, deadlineMissRes] = await Promise.all([
       supabase.from('checkins').select('id, date, mood').eq('user_id', userId)
         .gte('date', dateOffset(today, -365)).order('date', { ascending: false }),
       supabase.from('missed_days').select('date').eq('user_id', userId)
         .gte('date', dateOffset(today, -365)),
+      supabase.from('missed_goal_deadlines').select('deadline, verdict').eq('user_id', userId)
+        .gte('deadline', dateOffset(today, -365)),
     ])
 
     const checkins = checkinsRes.data || []
@@ -446,30 +534,48 @@ function App({ userId }) {
     const checkinMap = {}
     for (const c of checkins) checkinMap[c.date] = c.mood
     const missedDates = new Set((missedRes.data || []).map(m => m.date))
+    const deadlinePenaltyDates = new Set(
+      (deadlineMissRes.data || [])
+        .filter(m => m.verdict !== 'accepted')
+        .map(m => m.deadline),
+    )
+    for (const d of deadlinePenaltyDates) missedDates.add(d)
 
     // Streak (rest days don't break streaks, partial check-ins don't count)
     const restDays = JSON.parse(localStorage.getItem(`rest_days_${userId}`) || '[]')
-    let s = 0
-    if (qualifiedDates.has(today)) s = 1
-    let d = dateOffset(today, -1)
-    while (true) {
-      const dow = new Date(d).getDay()
-      if (restDays.includes(dow)) { d = dateOffset(d, -1); continue }
-      if (!qualifiedDates.has(d)) break
-      s++; d = dateOffset(d, -1)
-    }
-    setStreak(s)
+    const noActiveGoals = activeGoalCount === 0
+    setStreakPaused(noActiveGoals)
 
-    let vs = 0
-    if (verifiedQualifiedDates.has(today)) vs = 1
-    d = dateOffset(today, -1)
-    while (true) {
-      const dow = new Date(d).getDay()
-      if (restDays.includes(dow)) { d = dateOffset(d, -1); continue }
-      if (!verifiedQualifiedDates.has(d)) break
-      vs++; d = dateOffset(d, -1)
+    if (noActiveGoals) {
+      const lastQualified = getLatestDate(qualifiedDates)
+      const lastVerifiedQualified = getLatestDate(verifiedQualifiedDates)
+      setStreak(getConsecutiveStreakFromDate(qualifiedDates, lastQualified, dateOffset, restDays))
+      setVerifiedStreak(getConsecutiveStreakFromDate(verifiedQualifiedDates, lastVerifiedQualified, dateOffset, restDays))
+    } else {
+      let s = 0
+      if (!deadlinePenaltyDates.has(today) && qualifiedDates.has(today)) s = 1
+      let d = dateOffset(today, -1)
+      while (true) {
+        const dow = new Date(d).getDay()
+        if (restDays.includes(dow)) { d = dateOffset(d, -1); continue }
+        if (deadlinePenaltyDates.has(d)) break
+        if (!qualifiedDates.has(d)) break
+        s++; d = dateOffset(d, -1)
+      }
+      setStreak(s)
+
+      let vs = 0
+      if (!deadlinePenaltyDates.has(today) && verifiedQualifiedDates.has(today)) vs = 1
+      d = dateOffset(today, -1)
+      while (true) {
+        const dow = new Date(d).getDay()
+        if (restDays.includes(dow)) { d = dateOffset(d, -1); continue }
+        if (deadlinePenaltyDates.has(d)) break
+        if (!verifiedQualifiedDates.has(d)) break
+        vs++; d = dateOffset(d, -1)
+      }
+      setVerifiedStreak(vs)
     }
-    setVerifiedStreak(vs)
 
     // Last 30 — color-coded by mood
     const dots = []
@@ -492,54 +598,148 @@ function App({ userId }) {
     setLast30(dots)
   }
 
-  async function checkVerdicts(missedDays, userPartners) {
-    const minVotes = Math.max(Math.ceil(userPartners.length / 2), 2)
-    for (const missed of missedDays) {
-      if (missed.verdict) {
-        if (missed.verdict === 'rejected' && !missed.punishment_acknowledged) {
-          setPunishment({ date: missed.date, excuse: missed.excuse, voteCount: { accepts: missed.vote_accepts, rejects: missed.vote_rejects } })
-          return
-        }
-        continue
+  async function checkDeadlineVerdicts(deadlineMisses, userPartners, userGoals) {
+    const goalTitleById = {}
+    for (const goal of (userGoals || [])) goalTitleById[goal.id] = goal.title
+
+    for (const missed of deadlineMisses) {
+      const goalTitle = goalTitleById[missed.goal_id] || 'Goal'
+      const requestedExtensionText = missed.requested_deadline
+        ? ` Requested extension to ${formatDate(missed.requested_deadline)}.`
+        : ''
+      if (missed.verdict !== 'rejected') continue
+      if (!missed.shame_email_sent) {
+        try {
+          const excuseText = `${formatGoalDeadlineLabel(goalTitle, missed.deadline)} — ${missed.excuse}${requestedExtensionText}`
+          for (const p of userPartners) {
+            await emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_SHAME_TEMPLATE, {
+              to_email: p.email,
+              missed_date: formatDate(missed.deadline),
+              excuse_text: excuseText,
+              reject_count: missed.vote_rejects,
+              total_votes: missed.vote_total,
+            }, EMAILJS_PUBLIC_KEY)
+          }
+          await supabase.from('missed_goal_deadlines').update({ shame_email_sent: true }).eq('id', missed.id)
+        } catch (err) { console.error('Deadline shame email error:', err) }
       }
-      if (!missed.excuse_id || !missed.email_sent) continue
-      const { data: votes } = await supabase.from('excuse_votes').select('vote').eq('excuse_id', missed.excuse_id)
-      if (!votes || votes.length < minVotes) continue
-      const rejects = votes.filter(v => v.vote === 'reject').length
-      const accepts = votes.filter(v => v.vote === 'accept').length
-      const verdict = rejects > accepts ? 'rejected' : 'accepted'
-      await supabase.from('missed_days').update({ verdict, vote_accepts: accepts, vote_rejects: rejects, vote_total: votes.length }).eq('id', missed.id)
-      if (verdict === 'rejected' && !missed.shame_email_sent) {
+      if (!missed.punishment_acknowledged) {
+        setPunishment({
+          id: missed.id,
+          source: 'deadline',
+          date: missed.deadline,
+          excuse: `${formatGoalDeadlineLabel(goalTitle, missed.deadline)} — ${missed.excuse}${requestedExtensionText}`,
+          voteCount: { accepts: missed.vote_accepts, rejects: missed.vote_rejects },
+        })
+        return true
+      }
+    }
+
+    return false
+  }
+
+  async function checkVerdicts(missedDays, userPartners) {
+    for (const missed of missedDays) {
+      if (missed.verdict !== 'rejected') continue
+      if (!missed.shame_email_sent) {
         try {
           for (const p of userPartners) {
             await emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_SHAME_TEMPLATE, {
-              to_email: p.email, missed_date: formatDate(missed.date), excuse_text: missed.excuse, reject_count: rejects, total_votes: votes.length,
+              to_email: p.email,
+              missed_date: formatDate(missed.date),
+              excuse_text: missed.excuse,
+              reject_count: missed.vote_rejects,
+              total_votes: missed.vote_total,
             }, EMAILJS_PUBLIC_KEY)
           }
           await supabase.from('missed_days').update({ shame_email_sent: true }).eq('id', missed.id)
         } catch (err) { console.error('Shame email error:', err) }
-        setPunishment({ date: missed.date, excuse: missed.excuse, voteCount: { accepts, rejects } })
-        return
+      }
+      if (!missed.punishment_acknowledged) {
+        setPunishment({
+          id: missed.id,
+          source: 'missed_day',
+          date: missed.date,
+          excuse: missed.excuse,
+          voteCount: { accepts: missed.vote_accepts, rejects: missed.vote_rejects },
+        })
+        return true
       }
     }
+
+    return false
   }
 
   // ── Load pending vote progress ───────────────────────────
-  async function loadPendingVotes(missedDays, userPartners) {
-    const pending = missedDays.filter(m => m.excuse_id && m.email_sent && !m.verdict)
+  async function loadPendingVotes(missedDays, deadlineMisses, userPartners, userGoals) {
+    const goalTitleById = {}
+    for (const goal of (userGoals || [])) goalTitleById[goal.id] = goal.title
+    const currentPartnerEmails = userPartners
+      .map(p => String(p.email || '').trim().toLowerCase())
+      .filter(Boolean)
+
+    const pendingMissedDays = (missedDays || [])
+      .filter(m => m.excuse_id && m.email_sent && !m.verdict)
+      .map(m => ({
+        date: m.date,
+        excuse: m.excuse,
+        excuseId: m.excuse_id,
+        requiredVotes: m.required_votes || Math.max(Math.ceil((m.partner_count_snapshot || currentPartnerEmails.length) / 2), 2),
+        partnerCountSnapshot: m.partner_count_snapshot || currentPartnerEmails.length,
+      }))
+
+    const pendingDeadlines = (deadlineMisses || [])
+      .filter(m => m.excuse_id && m.email_sent && !m.verdict)
+      .map(m => {
+        const goalTitle = goalTitleById[m.goal_id] || 'Goal'
+        const requestedExtensionText = m.requested_deadline
+          ? ` Requested extension to ${formatDate(m.requested_deadline)}.`
+          : ''
+        return {
+          date: m.deadline,
+          excuse: `${formatGoalDeadlineLabel(goalTitle, m.deadline)} — ${m.excuse}${requestedExtensionText}`,
+          excuseId: m.excuse_id,
+          requiredVotes: m.required_votes || Math.max(Math.ceil((m.partner_count_snapshot || currentPartnerEmails.length) / 2), 2),
+          partnerCountSnapshot: m.partner_count_snapshot || currentPartnerEmails.length,
+        }
+      })
+
+    const pending = [...pendingMissedDays, ...pendingDeadlines]
     if (pending.length === 0) { setPendingVotes([]); return }
 
     const results = []
     for (const m of pending) {
-      const { data: votes } = await supabase.from('excuse_votes')
-        .select('voter_email, vote').eq('excuse_id', m.excuse_id)
-      const voteMap = {}
-      if (votes) for (const v of votes) voteMap[v.voter_email] = v.vote
+      const [votesRes, invitesRes] = await Promise.all([
+        supabase.from('excuse_votes')
+          .select('voter_email, vote')
+          .eq('excuse_id', m.excuseId)
+          .eq('owner_user_id', userId),
+        supabase.from('excuse_vote_invites')
+          .select('voter_email')
+          .eq('excuse_id', m.excuseId)
+          .eq('user_id', userId),
+      ])
 
-      const partnerVotes = userPartners.map(p => ({
-        email: p.email,
-        voted: !!voteMap[p.email],
-        vote: voteMap[p.email] || null,
+      const votes = votesRes.data || []
+      const rosterEmails = [...new Set(
+        (invitesRes.data || [])
+          .map(row => String(row.voter_email || '').trim().toLowerCase())
+          .filter(Boolean),
+      )]
+      const partnerEmails = rosterEmails.length > 0 ? rosterEmails : currentPartnerEmails
+
+      const voteMap = {}
+      if (votes) {
+        for (const v of votes) {
+          const emailKey = String(v.voter_email || '').trim().toLowerCase()
+          if (emailKey) voteMap[emailKey] = v.vote
+        }
+      }
+
+      const partnerVotes = partnerEmails.map(email => ({
+        email,
+        voted: !!voteMap[email],
+        vote: voteMap[email] || null,
       }))
       const accepts = (votes || []).filter(v => v.vote === 'accept').length
       const rejects = (votes || []).filter(v => v.vote === 'reject').length
@@ -547,12 +747,13 @@ function App({ userId }) {
       results.push({
         date: m.date,
         excuse: m.excuse,
-        excuseId: m.excuse_id,
+        excuseId: m.excuseId,
         partnerVotes,
         accepts,
         rejects,
         totalVoted: (votes || []).length,
-        totalPartners: userPartners.length,
+        totalPartners: m.partnerCountSnapshot || partnerEmails.length,
+        requiredVotes: m.requiredVotes,
       })
     }
     setPendingVotes(results)
@@ -695,12 +896,15 @@ function App({ userId }) {
   const dayVerifiedRatio = goals.length > 0 ? verifiedTodayGoals / goals.length : 0
   const dayVerifiedPct = Math.round(dayVerifiedRatio * 100)
   const hasFailedVerificationToday = failedTodayGoals > 0
-  const meetsStreakThreshold = goals.length > 0 && dayCompletionRatio >= STREAK_MIN_COMPLETION_RATIO
-  const isComplete = learned.trim().length >= 50
+  const hasVerificationReviewNeededToday = pendingTodayGoals > 0 || challengedTodayGoals > 0 || failedTodayGoals > 0 || auditTodayGoals > 0
+  const noActiveGoals = goals.length === 0
+  const meetsStreakThreshold = !noActiveGoals && dayCompletionRatio >= STREAK_MIN_COMPLETION_RATIO
+  const isComplete = !noActiveGoals
+    && learned.trim().length >= 50
     && built.trim().length > 0
     && completedGoalsWithProof > 0
     && !hasCompletedWithoutProof
-  const doneForToday = saveStatus === 'saved' && isComplete && failedTodayGoals === 0
+  const doneForToday = !noActiveGoals && saveStatus === 'saved' && isComplete && failedTodayGoals === 0
 
   useEffect(() => {
     if (!doneForToday || postSubmitUiApplied) return
@@ -710,18 +914,22 @@ function App({ userId }) {
 
   useEffect(() => {
     if (loading) return
+    if (noActiveGoals) { setSaveStatus('idle'); return }
     if (!isComplete) { setSaveStatus('idle'); return }
     setSaveStatus('idle')
     clearTimeout(autoSaveTimer.current)
     autoSaveTimer.current = setTimeout(doSave, 2000)
     return () => clearTimeout(autoSaveTimer.current)
-  }, [mood, learned, built, builtLink, goalProgress, isComplete, loading, doSave])
+  }, [mood, learned, built, builtLink, goalProgress, isComplete, loading, doSave, noActiveGoals])
 
   // ── Punishment ────────────────────────────────────────────
   async function acknowledgePunishment() {
     if (punishmentInput !== 'I will do better') return
-    await supabase.from('missed_days').update({ punishment_acknowledged: true })
-      .eq('user_id', userId).eq('date', punishment.date)
+    const table = punishment?.source === 'deadline' ? 'missed_goal_deadlines' : 'missed_days'
+    const query = supabase.from(table).update({ punishment_acknowledged: true }).eq('user_id', userId)
+    if (punishment?.id) await query.eq('id', punishment.id)
+    else if (table === 'missed_goal_deadlines') await query.eq('deadline', punishment.date)
+    else await query.eq('date', punishment.date)
     setPunishment(null)
     setPunishmentInput('')
   }
@@ -733,11 +941,19 @@ function App({ userId }) {
     setMissedSending(true)
 
     const excuseId = `${missedDate}-${Date.now()}`
-    const encodedExcuse = encodeURIComponent(excuse)
+    const partnerCountSnapshot = partners.length
+    const requiredVotes = Math.max(Math.ceil(partnerCountSnapshot / 2), 2)
 
-    const { error: insertErr } = await supabase.from('missed_days').insert({
-      user_id: userId, date: missedDate, excuse, was_avoidable: missedAvoidable, excuse_id: excuseId, email_sent: false,
-    })
+    const { data: missedRow, error: insertErr } = await supabase.from('missed_days').insert({
+      user_id: userId,
+      date: missedDate,
+      excuse,
+      was_avoidable: missedAvoidable,
+      excuse_id: excuseId,
+      email_sent: false,
+      required_votes: requiredVotes,
+      partner_count_snapshot: partnerCountSnapshot,
+    }).select('id').single()
     if (insertErr) { showToast('Failed to save excuse', 'error'); setMissedSending(false); return }
 
     const { data: recentCheckins } = await supabase.from('checkins').select('id, date')
@@ -762,21 +978,150 @@ function App({ userId }) {
       }
     }
 
+    let sentSuccessfully = false
     try {
+      const tokenByEmail = await createVoteInviteLinks({
+        sourceType: 'missed_day',
+        sourceId: missedRow.id,
+        excuseId,
+        missedDate,
+        excuseText: excuse,
+        emails: partners.map(p => p.email),
+      })
+
+      let sentCount = 0
       for (const p of partners) {
-        const base = `${VOTE_BASE_URL}?id=${excuseId}&email=${encodeURIComponent(p.email)}&date=${missedDate}&excuse=${encodedExcuse}`
+        const token = tokenByEmail[String(p.email || '').trim().toLowerCase()]
+        if (!token) continue
+        const base = `${VOTE_BASE_URL}?token=${encodeURIComponent(token)}`
         await emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, {
           to_email: p.email, missed_date: formatDate(missedDate), excuse_text: excuse,
           was_avoidable: missedAvoidable ? 'Yes' : 'No', streak: streakBefore,
           accept_url: base + '&vote=accept', reject_url: base + '&vote=reject',
         }, EMAILJS_PUBLIC_KEY)
+        sentCount++
       }
-      await supabase.from('missed_days').update({ email_sent: true }).eq('user_id', userId).eq('date', missedDate)
-      showToast(`Excuse sent to ${partners.length} accountability partners`)
+      if (sentCount === 0) {
+        showToast('Could not generate secure vote links', 'error')
+      } else {
+        await supabase.from('missed_days').update({ email_sent: true }).eq('id', missedRow.id)
+        sentSuccessfully = true
+        showToast(`Excuse sent to ${sentCount} accountability partners`)
+      }
     } catch (err) { showToast('Failed to send emails', 'error'); console.error('EmailJS error:', err) }
 
+    if (!sentSuccessfully) {
+      setMissedSending(false)
+      return
+    }
+
     setMissedDate(null); setMissedReason(''); setMissedAvoidable(null); setMissedSending(false)
-    await loadStreakAndDots()
+    await loadAll()
+  }
+
+  // ── Missed deadline submit ────────────────────────────────
+  async function handleDeadlineSubmit() {
+    const excuse = deadlineReason.trim()
+    const extensionDate = deadlineExtensionDate.trim()
+    if (!deadlineIssue || excuse.length < 80 || deadlineAvoidable === null) return
+    if (!isDateKey(extensionDate) || extensionDate <= today) {
+      showToast('Choose a valid new deadline after today', 'error')
+      return
+    }
+    if (extensionDate <= deadlineIssue.deadline) {
+      showToast('New deadline must be after the missed deadline', 'error')
+      return
+    }
+    setDeadlineSending(true)
+
+    const excuseId = `${deadlineIssue.goalId}-${deadlineIssue.deadline}-${Date.now()}`
+    const excuseText = `${formatGoalDeadlineLabel(deadlineIssue.title, deadlineIssue.deadline)} — ${excuse} Requested extension to ${formatDate(extensionDate)}.`
+    const partnerCountSnapshot = partners.length
+    const requiredVotes = Math.max(Math.ceil(partnerCountSnapshot / 2), 2)
+
+    const { data: deadlineRow, error: insertErr } = await supabase.from('missed_goal_deadlines').insert({
+      user_id: userId,
+      goal_id: deadlineIssue.goalId,
+      deadline: deadlineIssue.deadline,
+      excuse,
+      requested_deadline: extensionDate,
+      was_avoidable: deadlineAvoidable,
+      excuse_id: excuseId,
+      email_sent: false,
+      required_votes: requiredVotes,
+      partner_count_snapshot: partnerCountSnapshot,
+    }).select('id').single()
+    if (insertErr) { showToast('Failed to save deadline excuse', 'error'); setDeadlineSending(false); return }
+
+    const { data: recentCheckins } = await supabase.from('checkins').select('id, date')
+      .eq('user_id', userId).lt('date', deadlineIssue.deadline).order('date', { ascending: false }).limit(365)
+
+    let streakBefore = 0
+    if (recentCheckins && recentCheckins.length > 0) {
+      const checkinIds = recentCheckins.map(c => c.id)
+      const { data: gpRows } = await supabase.from('goal_progress')
+        .select('checkin_id, completed, proof_url, proof_image_path, verification_status')
+        .in('checkin_id', checkinIds)
+      const dailyQuality = buildDailyGoalQuality(recentCheckins, gpRows || [])
+      const qualifiedDates = getQualifiedDateSet(dailyQuality)
+      const restDays = JSON.parse(localStorage.getItem(`rest_days_${userId}`) || '[]')
+      let d = dateOffset(deadlineIssue.deadline, -1)
+      while (true) {
+        const dow = new Date(d).getDay()
+        if (restDays.includes(dow)) { d = dateOffset(d, -1); continue }
+        if (!qualifiedDates.has(d)) break
+        streakBefore++
+        d = dateOffset(d, -1)
+      }
+    }
+
+    let sentSuccessfully = false
+    try {
+      const tokenByEmail = await createVoteInviteLinks({
+        sourceType: 'deadline',
+        sourceId: deadlineRow.id,
+        excuseId,
+        missedDate: deadlineIssue.deadline,
+        excuseText,
+        emails: partners.map(p => p.email),
+      })
+
+      let sentCount = 0
+      for (const p of partners) {
+        const token = tokenByEmail[String(p.email || '').trim().toLowerCase()]
+        if (!token) continue
+        const base = `${VOTE_BASE_URL}?token=${encodeURIComponent(token)}`
+        await emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, {
+          to_email: p.email,
+          missed_date: formatDate(deadlineIssue.deadline),
+          excuse_text: excuseText,
+          was_avoidable: deadlineAvoidable ? 'Yes' : 'No',
+          streak: streakBefore,
+          accept_url: base + '&vote=accept',
+          reject_url: base + '&vote=reject',
+        }, EMAILJS_PUBLIC_KEY)
+        sentCount++
+      }
+      if (sentCount === 0) {
+        showToast('Could not generate secure vote links', 'error')
+      } else {
+        await supabase.from('missed_goal_deadlines').update({ email_sent: true }).eq('id', deadlineRow.id)
+        sentSuccessfully = true
+        showToast(`Deadline excuse sent to ${sentCount} accountability partners`)
+      }
+    } catch (err) { showToast('Failed to send deadline emails', 'error'); console.error('Deadline EmailJS error:', err) }
+
+    if (!sentSuccessfully) {
+      setDeadlineSending(false)
+      return
+    }
+
+    setDeadlineIssue(null)
+    setDeadlineReason('')
+    setDeadlineAvoidable(null)
+    setDeadlineExtensionDate('')
+    setDeadlineSending(false)
+    await loadAll()
   }
 
   // ── Image upload per goal (with resize) ──────────────────
@@ -867,7 +1212,8 @@ function App({ userId }) {
   const tomorrowDisplay = formatShortDate(dateOffset(today, 1))
 
   // ── Auto-save status label ────────────────────────────────
-  const saveLabel = saveStatus === 'saving' ? 'Saving...'
+  const saveLabel = noActiveGoals ? 'No active goals — add a new goal in Settings'
+    : saveStatus === 'saving' ? 'Saving...'
     : saveStatus === 'saved' ? (doneForToday ? 'All set for today' : hasFailedVerificationToday ? 'Saved - fix failed proof' : 'Saved')
     : saveStatus === 'error' ? 'Save failed'
     : isComplete ? 'Will auto-save' : 'Complete all fields to save'
@@ -914,6 +1260,51 @@ function App({ userId }) {
     )
   }
 
+  // ── Missed goal deadline ──────────────────────────────────
+  if (deadlineIssue) {
+    const charCount = deadlineReason.trim().length
+    const hasValidExtensionDate = isDateKey(deadlineExtensionDate) && deadlineExtensionDate > today && deadlineExtensionDate > deadlineIssue.deadline
+    const canSubmit = charCount >= 80 && deadlineAvoidable !== null && hasValidExtensionDate && !deadlineSending
+    return (
+      <div className="app">
+        <header><h1>Daily Check-in</h1><p className="date">{dateDisplay}</p></header>
+        <section className="card missed-card">
+          <h2>Missed Goal Deadline</h2>
+          <p className="missed-date">{formatDate(deadlineIssue.deadline)}</p>
+          <p className="missed-prompt">
+            Goal: <strong>{deadlineIssue.title}</strong>.
+            {' '}You missed this deadline. Submit an excuse; it will be sent to {partners.length} people for voting.
+          </p>
+          <textarea className="missed-textarea" placeholder="What blocked you? What changed? (at least 80 characters)"
+            value={deadlineReason} onChange={e => setDeadlineReason(e.target.value)} rows={5} />
+          <p className={`char-count ${charCount >= 80 ? 'met' : ''}`}>{charCount}/80 characters</p>
+          <div className="deadline-extension-section">
+            <p className="avoidable-label">New target deadline</p>
+            <input
+              type="date"
+              className="field-input"
+              value={deadlineExtensionDate}
+              min={dateOffset(today, 1)}
+              onChange={e => setDeadlineExtensionDate(e.target.value)}
+            />
+            <p className="settings-item-sub">Set when you will actually deliver this goal.</p>
+          </div>
+          <div className="avoidable-section">
+            <p className="avoidable-label">Was this avoidable?</p>
+            <div className="avoidable-toggle">
+              <button className={`toggle-btn ${deadlineAvoidable === true ? 'toggle-active toggle-yes' : ''}`} onClick={() => setDeadlineAvoidable(true)}>Yes</button>
+              <button className={`toggle-btn ${deadlineAvoidable === false ? 'toggle-active toggle-no' : ''}`} onClick={() => setDeadlineAvoidable(false)}>No</button>
+            </div>
+          </div>
+          <button className="save-btn" onClick={handleDeadlineSubmit} disabled={!canSubmit}>
+            {deadlineSending ? 'Sending...' : 'Submit Deadline Excuse & Notify Group'}
+          </button>
+        </section>
+        {toast && <div className={`toast toast-${toast.type}`}>{toast.message}</div>}
+      </div>
+    )
+  }
+
   // ── Missed day ────────────────────────────────────────────
   if (missedDate) {
     const charCount = missedReason.trim().length
@@ -956,17 +1347,47 @@ function App({ userId }) {
           <p className="streak">
             {streak} day streak
             <span className="streak-verified"> ({verifiedStreak} verified)</span>
+            {streakPaused && <span className="streak-paused"> (paused)</span>}
           </p>
         )}
-        <p className="streak-quality">
-          Quality: {completionAvgPct}% submitted / {verifiedAvgPct}% verified (30d)
-          {' '}| Today: {dayCompletionPct}% submitted, {dayVerifiedPct}% verified
-          {' '}({meetsStreakThreshold ? 'submission eligible' : `needs ${streakThresholdPct}% submitted`})
-        </p>
+        {noActiveGoals ? (
+          <p className="streak-quality">
+            No active goals. Streak is paused until you add a new goal.
+          </p>
+        ) : (
+          <p className="streak-quality">
+            Today: {dayCompletionPct}% submitted / {dayVerifiedPct}% verified
+            {' '}({meetsStreakThreshold ? 'submission eligible' : `needs ${streakThresholdPct}% submitted`})
+          </p>
+        )}
+        {!noActiveGoals && (
+          <>
+            <button className="header-detail-toggle" onClick={() => setShowHeaderDetails(v => !v)}>
+              {showHeaderDetails ? 'Hide quality details' : 'Show quality details'}
+            </button>
+            {showHeaderDetails && (
+              <p className="streak-quality streak-quality-sub">
+                Last 30 days: {completionAvgPct}% submitted / {verifiedAvgPct}% verified
+              </p>
+            )}
+          </>
+        )}
       </header>
 
       {/* Auto-save indicator */}
       <div className={`autosave-indicator autosave-${saveStatus}`}>{saveLabel}</div>
+
+      {noActiveGoals && (
+        <section className="card goal-cycle-card">
+          <h2>Goal Cycle Complete</h2>
+          <p className="goal-cycle-text">
+            You have no active goals right now. Add your next goal in Settings to resume streak progression.
+          </p>
+          {streak > 0 && (
+            <p className="goal-cycle-sub">Current streak is paused at {streak} day{streak === 1 ? '' : 's'}.</p>
+          )}
+        </section>
+      )}
 
       {doneForToday && (
         <section className="card day-done-card">
@@ -980,7 +1401,7 @@ function App({ userId }) {
         </section>
       )}
 
-      {completedGoalEntries.length > 0 && (
+      {completedGoalEntries.length > 0 && hasVerificationReviewNeededToday && (
         <section className="card verification-summary-card">
           <h2>Proof Verification</h2>
           <p className="verification-summary-line">
@@ -1201,7 +1622,7 @@ function App({ userId }) {
                       <span className="vote-tally-accept">{pv.accepts}</span>
                       <span className="vote-tally-sep">/</span>
                       <span className="vote-tally-reject">{pv.rejects}</span>
-                      <span className="vote-tally-total">({pv.totalVoted}/{pv.totalPartners} voted)</span>
+                      <span className="vote-tally-total">({pv.totalVoted}/{pv.totalPartners} voted, {pv.requiredVotes} required)</span>
                     </span>
                   </div>
                   <p className="vote-progress-excuse">"{pv.excuse.length > 100 ? pv.excuse.slice(0, 100) + '...' : pv.excuse}"</p>

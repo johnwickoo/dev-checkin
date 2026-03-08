@@ -88,3 +88,28 @@ export function getAverageCompletionPct(dailyQuality, fromDate = null) {
   const avgRatio = days.reduce((sum, day) => sum + day.completionRatio, 0) / days.length
   return Math.round(avgRatio * 100)
 }
+
+export function getLatestDate(dateSet) {
+  let latest = null
+  for (const date of (dateSet || [])) {
+    if (!latest || date > latest) latest = date
+  }
+  return latest
+}
+
+export function getConsecutiveStreakFromDate(dateSet, startDate, dateOffsetFn, restDays = []) {
+  if (!startDate) return 0
+  let streak = 1
+  let date = dateOffsetFn(startDate, -1)
+  while (true) {
+    const dow = new Date(date).getDay()
+    if (restDays.includes(dow)) {
+      date = dateOffsetFn(date, -1)
+      continue
+    }
+    if (!dateSet.has(date)) break
+    streak++
+    date = dateOffsetFn(date, -1)
+  }
+  return streak
+}

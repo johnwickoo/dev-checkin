@@ -6,6 +6,8 @@ import {
   buildDailyGoalQuality,
   getQualifiedDateSet,
   getAverageCompletionPct,
+  getLatestDate,
+  getConsecutiveStreakFromDate,
 } from './streakUtils.js'
 
 const MOOD_LABELS = ['Burnt out', 'Low', 'Okay', 'Focused', 'Locked in']
@@ -35,6 +37,10 @@ function formatDate(dateStr) {
   })
 }
 
+function formatGoalDeadlineLabel(goalTitle, deadline) {
+  return `Missed goal deadline: "${goalTitle}" (due ${formatDate(deadline)})`
+}
+
 function getWeekLabel(dateStr) {
   const [y, m, d] = dateStr.split('-').map(Number)
   const dt = new Date(y, m - 1, d)
@@ -46,24 +52,29 @@ function getWeekLabel(dateStr) {
 function StatsPage({ userId }) {
   const [stats, setStats] = useState(null)
   const [loading, setLoading] = useState(true)
-
-  useEffect(() => { computeStats() }, [])
+  const [showExtendedStats, setShowExtendedStats] = useState(false)
+  const [showMoodTrend, setShowMoodTrend] = useState(false)
+  const [showMissedDays, setShowMissedDays] = useState(false)
 
   async function computeStats() {
     const today = getToday()
 
     // Single batched query for all data
-    const [checkinsRes, missedRes, goalsRes] = await Promise.all([
+    const [checkinsRes, missedRes, deadlineMissRes, goalsRes] = await Promise.all([
       supabase.from('checkins').select('id, date, mood').eq('user_id', userId)
         .gte('date', dateOffset(today, -365)).order('date'),
       supabase.from('missed_days').select('*').eq('user_id', userId)
         .order('date', { ascending: false }),
-      supabase.from('goals').select('id, title').eq('user_id', userId).eq('active', true),
+      supabase.from('missed_goal_deadlines').select('*').eq('user_id', userId)
+        .order('deadline', { ascending: false }),
+      supabase.from('goals').select('id, title, active').eq('user_id', userId),
     ])
 
     const checkins = checkinsRes.data || []
     const missed = missedRes.data || []
+    const deadlineMisses = deadlineMissRes.data || []
     const goals = goalsRes.data || []
+    const activeGoals = goals.filter(g => g.active)
     let allGoalProgress = []
     if (checkins.length > 0) {
       const checkinIds = checkins.map(c => c.id)
@@ -90,26 +101,48 @@ function StatsPage({ userId }) {
     const restDays = JSON.parse(localStorage.getItem(`rest_days_${userId}`) || '[]')
 
     // Streaks (rest-day aware)
-    let currentStreak = 0
-    if (qualifiedDates.has(today)) currentStreak = 1
-    let d = dateOffset(today, -1)
-    while (true) {
-      const dow = new Date(d).getDay()
-      if (restDays.includes(dow)) { d = dateOffset(d, -1); continue }
-      if (!qualifiedDates.has(d)) break
-      currentStreak++
-      d = dateOffset(d, -1)
-    }
+    const deadlinePenaltyDates = new Set(
+      deadlineMisses.filter(m => m.verdict !== 'accepted').map(m => m.deadline),
+    )
 
+    const noActiveGoals = activeGoals.length === 0
+    let currentStreak = 0
     let verifiedCurrentStreak = 0
-    if (verifiedQualifiedDates.has(today)) verifiedCurrentStreak = 1
-    d = dateOffset(today, -1)
-    while (true) {
-      const dow = new Date(d).getDay()
-      if (restDays.includes(dow)) { d = dateOffset(d, -1); continue }
-      if (!verifiedQualifiedDates.has(d)) break
-      verifiedCurrentStreak++
-      d = dateOffset(d, -1)
+    if (noActiveGoals) {
+      currentStreak = getConsecutiveStreakFromDate(
+        qualifiedDates,
+        getLatestDate(qualifiedDates),
+        dateOffset,
+        restDays,
+      )
+      verifiedCurrentStreak = getConsecutiveStreakFromDate(
+        verifiedQualifiedDates,
+        getLatestDate(verifiedQualifiedDates),
+        dateOffset,
+        restDays,
+      )
+    } else {
+      if (!deadlinePenaltyDates.has(today) && qualifiedDates.has(today)) currentStreak = 1
+      let d = dateOffset(today, -1)
+      while (true) {
+        const dow = new Date(d).getDay()
+        if (restDays.includes(dow)) { d = dateOffset(d, -1); continue }
+        if (deadlinePenaltyDates.has(d)) break
+        if (!qualifiedDates.has(d)) break
+        currentStreak++
+        d = dateOffset(d, -1)
+      }
+
+      if (!deadlinePenaltyDates.has(today) && verifiedQualifiedDates.has(today)) verifiedCurrentStreak = 1
+      d = dateOffset(today, -1)
+      while (true) {
+        const dow = new Date(d).getDay()
+        if (restDays.includes(dow)) { d = dateOffset(d, -1); continue }
+        if (deadlinePenaltyDates.has(d)) break
+        if (!verifiedQualifiedDates.has(d)) break
+        verifiedCurrentStreak++
+        d = dateOffset(d, -1)
+      }
     }
 
     let longestStreak = 0, tempStreak = 0
@@ -117,6 +150,7 @@ function StatsPage({ userId }) {
       const date = dateOffset(today, -i)
       const dow = new Date(date).getDay()
       if (restDays.includes(dow)) continue
+      if (deadlinePenaltyDates.has(date)) { tempStreak = 0; continue }
       if (qualifiedDates.has(date)) {
         tempStreak++
         if (tempStreak > longestStreak) longestStreak = tempStreak
@@ -161,11 +195,11 @@ function StatsPage({ userId }) {
 
     // Goal progress over time (last 30 days)
     let goalStats = []
-    if (goals.length > 0) {
+    if (activeGoals.length > 0) {
       const last30Checkins = checkins.filter(c => c.date >= dateOffset(today, -30))
       if (last30Checkins.length > 0) {
         const recentCheckinIds = new Set(last30Checkins.map(c => c.id))
-        goalStats = goals.map(g => {
+        goalStats = activeGoals.map(g => {
           const entries = allGoalProgress.filter(p => recentCheckinIds.has(p.checkin_id) && p.goal_id === g.id)
           const completed = entries.filter(e => e.completed && hasGoalProof(e) && e.verification_status !== 'failed').length
           const verified = entries.filter(e => e.completed && hasGoalProof(e) && e.verification_status === 'verified').length
@@ -179,17 +213,28 @@ function StatsPage({ userId }) {
           }
         })
       } else {
-        goalStats = goals.map(g => ({ id: g.id, title: g.title, completed: 0, verified: 0, total: 0, pct: 0 }))
+        goalStats = activeGoals.map(g => ({ id: g.id, title: g.title, completed: 0, verified: 0, total: 0, pct: 0 }))
       }
     }
 
     // Missed entries
+    const goalTitleById = {}
+    for (const g of goals) goalTitleById[g.id] = g.title
+
     const missedEntries = missed.map(m => ({
       date: m.date,
       excuse: m.excuse,
       verdict: m.verdict || 'pending',
       voteCount: m.vote_total > 0 ? { accepts: m.vote_accepts, rejects: m.vote_rejects } : null,
     }))
+    const deadlineEntries = deadlineMisses.map(m => ({
+      date: m.deadline,
+      excuse: `${formatGoalDeadlineLabel(goalTitleById[m.goal_id] || 'Goal', m.deadline)} — ${m.excuse}${m.requested_deadline ? ` Requested extension to ${formatDate(m.requested_deadline)}.` : ''}`,
+      verdict: m.verdict || 'pending',
+      voteCount: m.vote_total > 0 ? { accepts: m.vote_accepts, rejects: m.vote_rejects } : null,
+    }))
+    const allMissedEntries = [...missedEntries, ...deadlineEntries]
+      .sort((a, b) => b.date.localeCompare(a.date))
 
     setStats({
       currentStreak,
@@ -203,10 +248,13 @@ function StatsPage({ userId }) {
       consistency: Math.min(consistency, 100),
       weeklyMood,
       goalStats,
-      missedEntries,
+      missedEntries: allMissedEntries,
+      streakPaused: noActiveGoals,
     })
     setLoading(false)
   }
+
+  useEffect(() => { computeStats() }, [])
 
   if (loading || !stats) {
     return (
@@ -223,16 +271,21 @@ function StatsPage({ userId }) {
 
   return (
     <div className="app">
+      <header>
+        <h1>Stats</h1>
+        <p className="date">At a glance first. Expand details only when you need them.</p>
+      </header>
+
       <section className="card">
         <h2>Performance Report</h2>
         <div className="stats-grid">
           <div className="stat-block">
             <span className="stat-value">{stats.currentStreak}</span>
-            <span className="stat-label">Current Streak</span>
+            <span className="stat-label">{stats.streakPaused ? 'Current Streak (Paused)' : 'Current Streak'}</span>
           </div>
           <div className="stat-block">
             <span className="stat-value">{stats.verifiedCurrentStreak}</span>
-            <span className="stat-label">Verified Streak</span>
+            <span className="stat-label">{stats.streakPaused ? 'Verified Streak (Paused)' : 'Verified Streak'}</span>
           </div>
           <div className="stat-block">
             <span className="stat-value">{stats.longestStreak}</span>
@@ -250,25 +303,38 @@ function StatsPage({ userId }) {
             </span>
             <span className="stat-label">Verified Completion</span>
           </div>
-          <div className="stat-block">
-            <span className="stat-value">{stats.qualifiedDays}</span>
-            <span className="stat-label">Qualified Days</span>
-          </div>
-          <div className="stat-block">
-            <span className={`stat-value ${stats.consistency < 50 ? 'stat-bad' : stats.consistency >= 80 ? 'stat-good' : ''}`}>
-              {stats.consistency}%
-            </span>
-            <span className="stat-label">Check-in Consistency</span>
-          </div>
-          <div className="stat-block">
-            <span className="stat-value">{stats.totalLogged}</span>
-            <span className="stat-label">Days Logged</span>
-          </div>
+          {showExtendedStats && (
+            <>
+              <div className="stat-block">
+                <span className="stat-value">{stats.qualifiedDays}</span>
+                <span className="stat-label">Qualified Days</span>
+              </div>
+              <div className="stat-block">
+                <span className={`stat-value ${stats.consistency < 50 ? 'stat-bad' : stats.consistency >= 80 ? 'stat-good' : ''}`}>
+                  {stats.consistency}%
+                </span>
+                <span className="stat-label">Check-in Consistency</span>
+              </div>
+              <div className="stat-block">
+                <span className="stat-value">{stats.totalLogged}</span>
+                <span className="stat-label">Days Logged</span>
+              </div>
+            </>
+          )}
         </div>
+        <button className="header-detail-toggle stats-detail-toggle" onClick={() => setShowExtendedStats(v => !v)}>
+          {showExtendedStats ? 'Hide extended metrics' : 'Show extended metrics'}
+        </button>
         <div className="stat-sub">
           {stats.totalLogged} days logged / {stats.activeDays} active days (rest days excluded)
           <br />
           {stats.qualifiedDays} days met submission quality ({streakThresholdPct}%+ completed with proof)
+          {stats.streakPaused && (
+            <>
+              <br />
+              No active goals right now. Streak values are frozen until new goals are added.
+            </>
+          )}
         </div>
       </section>
 
@@ -296,62 +362,74 @@ function StatsPage({ userId }) {
       )}
 
       <section className="card card-accent-purple">
-        <h2>Weekly Mood Average</h2>
-        {stats.weeklyMood.length === 0 ? (
-          <p className="empty-state">No mood data yet. Start logging your mood to see trends here.</p>
-        ) : (
-          <div className="mood-chart">
-            {stats.weeklyMood.map(({ week, avg, count }) => (
-              <div key={week} className="mood-bar-col">
-                <div className="mood-bar-track">
-                  <div
-                    className={`mood-bar-fill ${avg <= 2 ? 'bar-low' : avg >= 4 ? 'bar-high' : 'bar-mid'}`}
-                    style={{ height: `${(avg / maxMood) * 100}%` }}
-                  />
-                </div>
-                <span className="mood-bar-val">{avg.toFixed(1)}</span>
-                <span className="mood-bar-label">{week}</span>
-                <span className="mood-bar-count">{count}d</span>
+        <h2 className="card-header" onClick={() => setShowMoodTrend(v => !v)}>
+          Weekly Mood Average {showMoodTrend ? '' : '(hidden)'}
+        </h2>
+        {showMoodTrend && (
+          <>
+            {stats.weeklyMood.length === 0 ? (
+              <p className="empty-state">No mood data yet. Start logging your mood to see trends here.</p>
+            ) : (
+              <div className="mood-chart">
+                {stats.weeklyMood.map(({ week, avg, count }) => (
+                  <div key={week} className="mood-bar-col">
+                    <div className="mood-bar-track">
+                      <div
+                        className={`mood-bar-fill ${avg <= 2 ? 'bar-low' : avg >= 4 ? 'bar-high' : 'bar-mid'}`}
+                        style={{ height: `${(avg / maxMood) * 100}%` }}
+                      />
+                    </div>
+                    <span className="mood-bar-val">{avg.toFixed(1)}</span>
+                    <span className="mood-bar-label">{week}</span>
+                    <span className="mood-bar-count">{count}d</span>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
+            )}
+            <div className="mood-chart-legend">
+              {MOOD_LABELS.map((label, i) => (
+                <span key={i}>{i + 1}={label}</span>
+              ))}
+            </div>
+          </>
         )}
-        <div className="mood-chart-legend">
-          {MOOD_LABELS.map((label, i) => (
-            <span key={i}>{i + 1}={label}</span>
-          ))}
-        </div>
       </section>
 
       <section className="card">
-        <h2>Missed Days ({stats.missedEntries.length})</h2>
-        {stats.missedEntries.length === 0 ? (
-          <p className="empty-state">No missed days. Clean record — keep it up.</p>
-        ) : (
-          <div className="missed-list">
-            {stats.missedEntries.map(entry => (
-              <div key={entry.date} className="missed-row">
-                <div className="missed-row-header">
-                  <span className="missed-row-date">{formatDate(entry.date)}</span>
-                  <span className={`history-badge ${
-                    entry.verdict === 'rejected' ? 'badge-missed' :
-                    entry.verdict === 'accepted' ? 'badge-done' :
-                    'badge-pending'
-                  }`}>
-                    {entry.verdict === 'rejected' ? 'Rejected' :
-                     entry.verdict === 'accepted' ? 'Accepted' :
-                     'Pending'}
-                  </span>
-                </div>
-                <p className="missed-row-excuse">{entry.excuse}</p>
-                {entry.voteCount && (
-                  <p className="missed-row-votes">
-                    {entry.voteCount.accepts} accept / {entry.voteCount.rejects} reject
-                  </p>
-                )}
+        <h2 className="card-header" onClick={() => setShowMissedDays(v => !v)}>
+          Missed Days ({stats.missedEntries.length}) {showMissedDays ? '' : '(hidden)'}
+        </h2>
+        {showMissedDays && (
+          <>
+            {stats.missedEntries.length === 0 ? (
+              <p className="empty-state">No missed days. Clean record — keep it up.</p>
+            ) : (
+              <div className="missed-list">
+                {stats.missedEntries.map(entry => (
+                  <div key={entry.date} className="missed-row">
+                    <div className="missed-row-header">
+                      <span className="missed-row-date">{formatDate(entry.date)}</span>
+                      <span className={`history-badge ${
+                        entry.verdict === 'rejected' ? 'badge-missed' :
+                        entry.verdict === 'accepted' ? 'badge-done' :
+                        'badge-pending'
+                      }`}>
+                        {entry.verdict === 'rejected' ? 'Rejected' :
+                         entry.verdict === 'accepted' ? 'Accepted' :
+                         'Pending'}
+                      </span>
+                    </div>
+                    <p className="missed-row-excuse">{entry.excuse}</p>
+                    {entry.voteCount && (
+                      <p className="missed-row-votes">
+                        {entry.voteCount.accepts} accept / {entry.voteCount.rejects} reject
+                      </p>
+                    )}
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
+            )}
+          </>
         )}
       </section>
     </div>

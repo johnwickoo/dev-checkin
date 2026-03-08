@@ -3,8 +3,9 @@ import { supabase } from './supabase.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
-function SettingsPage({ userId, onSetupComplete, onSkip }) {
+function SettingsPage({ userId, onSetupComplete, onSkip, onLogout, theme = 'dark', onToggleTheme }) {
   const [goals, setGoals] = useState([])
+  const [completedGoals, setCompletedGoals] = useState([])
   const [partners, setPartners] = useState([])
   const [newGoal, setNewGoal] = useState('')
   const [newDeadline, setNewDeadline] = useState('')
@@ -12,6 +13,8 @@ function SettingsPage({ userId, onSetupComplete, onSkip }) {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [showRestDays, setShowRestDays] = useState(false)
+  const [showNotifications, setShowNotifications] = useState(false)
 
   // Rest days
   const [restDays, setRestDays] = useState([])
@@ -22,17 +25,16 @@ function SettingsPage({ userId, onSetupComplete, onSkip }) {
     typeof Notification !== 'undefined' ? Notification.permission : 'denied'
   )
 
-  useEffect(() => {
-    loadData()
-  }, [])
-
   async function loadData() {
     setLoading(true)
-    const [goalsRes, partnersRes] = await Promise.all([
+    const [goalsRes, completedGoalsRes, partnersRes] = await Promise.all([
       supabase.from('goals').select('*').eq('user_id', userId).eq('active', true).order('created_at'),
+      supabase.from('goals').select('*').eq('user_id', userId).not('completed_at', 'is', null)
+        .order('completed_at', { ascending: false }).limit(20),
       supabase.from('accountability_partners').select('*').eq('user_id', userId).order('created_at'),
     ])
     if (goalsRes.data) setGoals(goalsRes.data)
+    if (completedGoalsRes.data) setCompletedGoals(completedGoalsRes.data)
     if (partnersRes.data) setPartners(partnersRes.data)
 
     // Load rest days from localStorage
@@ -46,6 +48,10 @@ function SettingsPage({ userId, onSetupComplete, onSkip }) {
     setLoading(false)
   }
 
+  useEffect(() => {
+    loadData()
+  }, [])
+
   async function addGoal() {
     const title = newGoal.trim()
     if (!title) return
@@ -53,7 +59,7 @@ function SettingsPage({ userId, onSetupComplete, onSkip }) {
     setError('')
     const { data, error: err } = await supabase
       .from('goals')
-      .insert({ user_id: userId, title, deadline: newDeadline || null })
+      .insert({ user_id: userId, title, deadline: newDeadline || null, completed_at: null, active: true })
       .select()
       .single()
     if (err) {
@@ -67,8 +73,32 @@ function SettingsPage({ userId, onSetupComplete, onSkip }) {
   }
 
   async function removeGoal(id) {
-    await supabase.from('goals').update({ active: false }).eq('id', id)
+    if (goals.length <= 1) {
+      setError('Keep at least 1 active goal for accountability.')
+      return
+    }
+    await supabase.from('goals').update({ active: false, completed_at: null }).eq('id', id)
     setGoals(prev => prev.filter(g => g.id !== id))
+    setCompletedGoals(prev => prev.filter(g => g.id !== id))
+  }
+
+  async function completeGoal(id) {
+    const completedAt = new Date().toISOString()
+    await supabase.from('goals').update({ active: false, completed_at: completedAt }).eq('id', id)
+    const goal = goals.find(g => g.id === id)
+    setGoals(prev => prev.filter(g => g.id !== id))
+    if (goal) {
+      setCompletedGoals(prev => [{ ...goal, active: false, completed_at: completedAt }, ...prev])
+    }
+  }
+
+  async function reactivateGoal(id) {
+    await supabase.from('goals').update({ active: true, completed_at: null }).eq('id', id)
+    const goal = completedGoals.find(g => g.id === id)
+    setCompletedGoals(prev => prev.filter(g => g.id !== id))
+    if (goal) {
+      setGoals(prev => [...prev, { ...goal, active: true, completed_at: null }])
+    }
   }
 
   async function addPartner() {
@@ -92,6 +122,10 @@ function SettingsPage({ userId, onSetupComplete, onSkip }) {
   }
 
   async function removePartner(id) {
+    if (partners.length <= 3) {
+      setError('At least 3 accountability partners are required.')
+      return
+    }
     await supabase.from('accountability_partners').delete().eq('id', id)
     setPartners(prev => prev.filter(p => p.id !== id))
   }
@@ -133,6 +167,9 @@ function SettingsPage({ userId, onSetupComplete, onSkip }) {
       <header>
         <h1>Settings</h1>
         <p className="date">Set up your goals and accountability partners</p>
+        <p className="streak-quality">
+          {isSetupDone ? 'Setup complete' : `Setup in progress: ${Math.min(goals.length, 1)}/1 goal, ${partners.length}/3 partners`}
+        </p>
       </header>
 
       <section className="card card-accent-green">
@@ -148,7 +185,10 @@ function SettingsPage({ userId, onSetupComplete, onSkip }) {
                   <span className="settings-item-sub">due {goal.deadline}</span>
                 )}
               </div>
-              <button className="settings-remove" onClick={() => removeGoal(goal.id)}>x</button>
+              <div className="settings-item-actions">
+                <button className="settings-complete" onClick={() => completeGoal(goal.id)}>Done</button>
+                <button className="settings-remove" onClick={() => removeGoal(goal.id)}>x</button>
+              </div>
             </div>
           ))}
         </div>
@@ -177,6 +217,28 @@ function SettingsPage({ userId, onSetupComplete, onSkip }) {
         </div>
       </section>
 
+      {completedGoals.length > 0 && (
+        <section className="card">
+          <h2>Completed Goals ({completedGoals.length})</h2>
+          <p className="subtitle">Finished goals are removed from daily streak requirements.</p>
+          <div className="settings-list">
+            {completedGoals.map(goal => (
+              <div key={goal.id} className="settings-item">
+                <div className="settings-item-info">
+                  <span className="settings-item-name">{goal.title}</span>
+                  <span className="settings-item-sub">
+                    completed {new Date(goal.completed_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                  </span>
+                </div>
+                <button className="history-toggle settings-reactivate" onClick={() => reactivateGoal(goal.id)}>
+                  Reactivate
+                </button>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
       <section className="card">
         <h2>Accountability Partners ({partners.length})</h2>
         <p className="subtitle">
@@ -187,7 +249,14 @@ function SettingsPage({ userId, onSetupComplete, onSkip }) {
           {partners.map(p => (
             <div key={p.id} className="settings-item">
               <span className="settings-item-name">{p.email}</span>
-              <button className="settings-remove" onClick={() => removePartner(p.id)}>x</button>
+              <button
+                className="settings-remove"
+                onClick={() => removePartner(p.id)}
+                disabled={partners.length <= 3}
+                title={partners.length <= 3 ? 'Need at least 3 partners' : 'Remove partner'}
+              >
+                x
+              </button>
             </div>
           ))}
         </div>
@@ -208,55 +277,93 @@ function SettingsPage({ userId, onSetupComplete, onSkip }) {
       </section>
 
       <section className="card">
-        <h2>Rest Days</h2>
-        <p className="subtitle">
-          Select days you take off. Rest days won't break your streak or trigger missed-day excuses.
-        </p>
-        <div className="rest-day-grid">
-          {DAY_NAMES.map((name, i) => (
-            <button
-              key={i}
-              className={`rest-day-btn ${restDays.includes(i) ? 'rest-day-active' : ''}`}
-              onClick={() => toggleRestDay(i)}
-            >
-              {name}
-            </button>
-          ))}
-        </div>
+        <h2 className="card-header" onClick={() => setShowRestDays(v => !v)}>
+          Rest Days {showRestDays ? '' : '(hidden)'}
+        </h2>
+        {showRestDays && (
+          <>
+            <p className="subtitle">
+              Select days you take off. Rest days won't break your streak or trigger missed-day excuses.
+            </p>
+            <div className="rest-day-grid">
+              {DAY_NAMES.map((name, i) => (
+                <button
+                  key={i}
+                  className={`rest-day-btn ${restDays.includes(i) ? 'rest-day-active' : ''}`}
+                  onClick={() => toggleRestDay(i)}
+                >
+                  {name}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
       </section>
 
       <section className="card card-accent-purple">
-        <h2>Notifications</h2>
-        <p className="subtitle">Get a browser reminder if you haven't checked in by a certain hour.</p>
+        <h2 className="card-header" onClick={() => setShowNotifications(v => !v)}>
+          Notifications {showNotifications ? '' : '(hidden)'}
+        </h2>
+        {showNotifications && (
+          <>
+            <p className="subtitle">Get a browser reminder if you haven't checked in by a certain hour.</p>
 
-        {notifPermission === 'granted' ? (
-          <div className="notif-settings">
-            <label className="notif-label">
-              Remind me after
-              <input
-                type="number"
-                className="field-input notif-hour-input"
-                min={0}
-                max={23}
-                value={reminderHour}
-                onChange={e => handleReminderHour(e.target.value)}
-              />
-              :00
-            </label>
-            <p className="settings-item-sub">
-              You'll get a notification if you haven't checked in by {reminderHour}:00.
-            </p>
-          </div>
-        ) : notifPermission === 'denied' ? (
-          <p className="empty-state">
-            Notifications are blocked. Enable them in your browser settings to use reminders.
-          </p>
-        ) : (
-          <button className="save-btn" onClick={requestNotifPermission}>
-            Enable Browser Notifications
-          </button>
+            {notifPermission === 'granted' ? (
+              <div className="notif-settings">
+                <label className="notif-label">
+                  Remind me after
+                  <input
+                    type="number"
+                    className="field-input notif-hour-input"
+                    min={0}
+                    max={23}
+                    value={reminderHour}
+                    onChange={e => handleReminderHour(e.target.value)}
+                  />
+                  :00
+                </label>
+                <p className="settings-item-sub">
+                  You'll get a notification if you haven't checked in by {reminderHour}:00.
+                </p>
+              </div>
+            ) : notifPermission === 'denied' ? (
+              <p className="empty-state">
+                Notifications are blocked. Enable them in your browser settings to use reminders.
+              </p>
+            ) : (
+              <button className="save-btn" onClick={requestNotifPermission}>
+                Enable Browser Notifications
+              </button>
+            )}
+          </>
         )}
       </section>
+
+      {(onToggleTheme || onLogout) && (
+        <section className="card">
+          <h2>Appearance & Account</h2>
+          <p className="subtitle">Adjust display mode and manage your session.</p>
+          {onToggleTheme && (
+            <div className="settings-theme-row">
+              <button
+                className="theme-toggle"
+                onClick={onToggleTheme}
+                aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
+              >
+                <span className={`theme-toggle-switch ${theme === 'dark' ? 'theme-toggle-switch-on' : ''}`}>
+                  <span className="theme-toggle-thumb" />
+                </span>
+                <span className="theme-toggle-label">{theme === 'dark' ? 'Dark mode' : 'Light mode'}</span>
+              </button>
+            </div>
+          )}
+          {onLogout && (
+            <button className="history-toggle settings-logout-btn" onClick={onLogout}>
+              Log out
+            </button>
+          )}
+        </section>
+      )}
 
       {error && <p className="missed-error">{error}</p>}
 
