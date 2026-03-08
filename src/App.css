@@ -753,6 +753,17 @@ header h1::before {
   color: #4ade80 !important;
 }
 
+/* Login Form */
+.login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.login-form .field-input {
+  margin-top: 0;
+}
+
 /* Tab Navigation */
 .tab-nav {
   display: flex;
@@ -786,6 +797,17 @@ header h1::before {
 .tab-active {
   background: #1a1a1a;
   color: #e0e0e0;
+}
+
+.tab-logout {
+  flex: 0;
+  white-space: nowrap;
+  color: #ef4444;
+  font-size: 0.7rem;
+}
+
+.tab-logout:hover {
+  color: #f87171;
 }
 
 /* Stats Page */
