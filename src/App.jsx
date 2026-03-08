@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import emailjs from '@emailjs/browser'
 import { supabase } from './supabase.js'
 import {
   STREAK_MIN_COMPLETION_RATIO,
@@ -13,10 +12,6 @@ import {
 } from './streakUtils.js'
 import './App.css'
 
-const EMAILJS_SERVICE_ID     = import.meta.env.VITE_EMAILJS_SERVICE_ID
-const EMAILJS_TEMPLATE_ID    = import.meta.env.VITE_EMAILJS_TEMPLATE_ID
-const EMAILJS_SHAME_TEMPLATE = import.meta.env.VITE_EMAILJS_SHAME_TEMPLATE
-const EMAILJS_PUBLIC_KEY     = import.meta.env.VITE_EMAILJS_PUBLIC_KEY
 const VOTE_BASE_URL          = import.meta.env.VITE_VOTE_BASE_URL
 
 const MOOD_LABELS = ['Burnt out', 'Low', 'Okay', 'Focused', 'Locked in']
@@ -349,6 +344,25 @@ function App({ userId }) {
     return tokenByEmail
   }
 
+  async function sendAccountabilityEmails({ mode, messages }) {
+    if (!Array.isArray(messages) || messages.length === 0) return { sent: 0, failed: 0, failures: [] }
+    const { data: { user }, error: userErr } = await supabase.auth.getUser()
+    if (userErr || !user) {
+      throw new Error('You are not authenticated. Please sign in again.')
+    }
+    const { data, error } = await supabase.functions.invoke('send-accountability-email', {
+      body: { mode, messages },
+    })
+    if (error) throw error
+    if (!data?.success) {
+      const details = Array.isArray(data?.failures) && data.failures.length > 0
+        ? ` (${data.failures.map(f => `${f.to_email}: ${f.error}`).join('; ')})`
+        : ''
+      throw new Error(`Email sending failed${details}`)
+    }
+    return data
+  }
+
   // ── Online/Offline ────────────────────────────────────────
   useEffect(() => {
     function onOnline() { setIsOnline(true); flushOfflineQueue() }
@@ -365,11 +379,11 @@ function App({ userId }) {
     setLoading(true)
     if (navigator.onLine) await flushOfflineQueue()
 
-    const [goalsRes, partnersRes, checkinRes, yesterdayRes, missedRes, deadlineMissRes] = await Promise.all([
+    const [goalsRes, partnersRes, checkinRes, checkinDatesRes, missedRes, deadlineMissRes] = await Promise.all([
       supabase.from('goals').select('*').eq('user_id', userId).eq('active', true).order('created_at'),
       supabase.from('accountability_partners').select('*').eq('user_id', userId),
       supabase.from('checkins').select('*').eq('user_id', userId).eq('date', today).maybeSingle(),
-      supabase.from('checkins').select('id').eq('user_id', userId).eq('date', getYesterday()).maybeSingle(),
+      supabase.from('checkins').select('date').eq('user_id', userId).lt('date', today).order('date', { ascending: true }),
       supabase.from('missed_days').select('*').eq('user_id', userId).order('date', { ascending: false }),
       supabase.from('missed_goal_deadlines').select('*').eq('user_id', userId).order('deadline', { ascending: false }),
     ])
@@ -458,33 +472,88 @@ function App({ userId }) {
 
     // Check rest days
     const restDays = JSON.parse(localStorage.getItem(`rest_days_${userId}`) || '[]')
-    const yesterdayDow = new Date(getYesterday()).getDay()
-    const isRestDay = restDays.includes(yesterdayDow)
-
-    // Check if yesterday was missed
+    const checkinDateSet = new Set((checkinDatesRes.data || []).map(c => c.date))
     const missedDays = missedRes.data || []
     const deadlineMisses = deadlineMissRes.data || []
-    const yesterdayMissed = userGoals.length > 0
-      && !yesterdayRes.data
-      && !missedDays.find(m => m.date === getYesterday())
-      && !isRestDay
-    if (yesterdayMissed) setMissedDate(getYesterday())
-    else setMissedDate(null)
+    const missedDaySet = new Set(missedDays.map(m => m.date))
+    const oldestScanDate = dateOffset(today, -365)
+    const goalStartCandidates = userGoals
+      .map(g => (g.created_at ? toDateKey(new Date(g.created_at)) : null))
+      .filter(Boolean)
+      .sort()
+    const scanStart = goalStartCandidates[0] && goalStartCandidates[0] > oldestScanDate
+      ? goalStartCandidates[0]
+      : oldestScanDate
+    const yesterday = getYesterday()
+
+    let nextMissingDate = null
+    if (userGoals.length > 0 && scanStart <= yesterday) {
+      let d = scanStart
+      while (d <= yesterday) {
+        const dow = new Date(d).getDay()
+        const isRestDay = restDays.includes(dow)
+        if (!isRestDay && !checkinDateSet.has(d) && !missedDaySet.has(d)) {
+          nextMissingDate = d
+          break
+        }
+        d = dateOffset(d, 1)
+      }
+    }
+
+    const nextPendingMissedDay = [...missedDays]
+      .filter(m => !m.email_sent && !m.verdict)
+      .sort((a, b) => a.date.localeCompare(b.date))[0] || null
+
+    if (nextPendingMissedDay) {
+      setMissedDate(nextPendingMissedDay.date)
+      setMissedReason(nextPendingMissedDay.excuse || '')
+      setMissedAvoidable(nextPendingMissedDay.was_avoidable === null ? null : !!nextPendingMissedDay.was_avoidable)
+      setMissedSending(false)
+    } else if (nextMissingDate) {
+      setMissedDate(nextMissingDate)
+      setMissedReason('')
+      setMissedAvoidable(null)
+      setMissedSending(false)
+    } else {
+      setMissedDate(null)
+      setMissedReason('')
+      setMissedAvoidable(null)
+      setMissedSending(false)
+    }
 
     const overdueGoals = userGoals
       .filter(g => g.deadline && g.deadline < today)
       .sort((a, b) => a.deadline.localeCompare(b.deadline))
     const deadlineMissedKeys = new Set(deadlineMisses.map(m => `${m.goal_id}:${m.deadline}`))
     const nextDeadlineIssue = overdueGoals.find(g => !deadlineMissedKeys.has(`${g.id}:${g.deadline}`))
+    const nextPendingDeadline = [...deadlineMisses]
+      .filter(m => !m.email_sent && !m.verdict)
+      .sort((a, b) => a.deadline.localeCompare(b.deadline))[0] || null
 
     const hasDeadlinePunishment = await checkDeadlineVerdicts(deadlineMisses, userPartners, userGoals)
     const hasMissedDayPunishment = hasDeadlinePunishment ? false : await checkVerdicts(missedDays, userPartners)
 
     if (!hasDeadlinePunishment && !hasMissedDayPunishment) setPunishment(null)
 
-    if (nextDeadlineIssue && !hasDeadlinePunishment) {
+    if (!hasDeadlinePunishment && nextPendingDeadline) {
+      const matchingGoal = userGoals.find(g => g.id === nextPendingDeadline.goal_id)
+      setDeadlineIssue({
+        goalId: nextPendingDeadline.goal_id,
+        title: matchingGoal?.title || 'Goal',
+        deadline: nextPendingDeadline.deadline,
+      })
+      setDeadlineReason(nextPendingDeadline.excuse || '')
+      setDeadlineAvoidable(nextPendingDeadline.was_avoidable === null ? null : !!nextPendingDeadline.was_avoidable)
+      setDeadlineExtensionDate(
+        nextPendingDeadline.requested_deadline || getSuggestedExtensionDate(nextPendingDeadline.deadline),
+      )
+      setDeadlineSending(false)
+    } else if (nextDeadlineIssue && !hasDeadlinePunishment) {
       setDeadlineIssue({ goalId: nextDeadlineIssue.id, title: nextDeadlineIssue.title, deadline: nextDeadlineIssue.deadline })
+      setDeadlineReason('')
+      setDeadlineAvoidable(null)
       setDeadlineExtensionDate(getSuggestedExtensionDate(nextDeadlineIssue.deadline))
+      setDeadlineSending(false)
     } else {
       setDeadlineIssue(null)
       setDeadlineReason('')
@@ -611,15 +680,14 @@ function App({ userId }) {
       if (!missed.shame_email_sent) {
         try {
           const excuseText = `${formatGoalDeadlineLabel(goalTitle, missed.deadline)} — ${missed.excuse}${requestedExtensionText}`
-          for (const p of userPartners) {
-            await emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_SHAME_TEMPLATE, {
-              to_email: p.email,
-              missed_date: formatDate(missed.deadline),
-              excuse_text: excuseText,
-              reject_count: missed.vote_rejects,
-              total_votes: missed.vote_total,
-            }, EMAILJS_PUBLIC_KEY)
-          }
+          const messages = userPartners.map(p => ({
+            to_email: p.email,
+            missed_date: formatDate(missed.deadline),
+            excuse_text: excuseText,
+            reject_count: missed.vote_rejects,
+            total_votes: missed.vote_total,
+          }))
+          await sendAccountabilityEmails({ mode: 'shame', messages })
           await supabase.from('missed_goal_deadlines').update({ shame_email_sent: true }).eq('id', missed.id)
         } catch (err) { console.error('Deadline shame email error:', err) }
       }
@@ -643,15 +711,14 @@ function App({ userId }) {
       if (missed.verdict !== 'rejected') continue
       if (!missed.shame_email_sent) {
         try {
-          for (const p of userPartners) {
-            await emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_SHAME_TEMPLATE, {
+          const messages = userPartners.map(p => ({
               to_email: p.email,
               missed_date: formatDate(missed.date),
               excuse_text: missed.excuse,
               reject_count: missed.vote_rejects,
               total_votes: missed.vote_total,
-            }, EMAILJS_PUBLIC_KEY)
-          }
+            }))
+          await sendAccountabilityEmails({ mode: 'shame', messages })
           await supabase.from('missed_days').update({ shame_email_sent: true }).eq('id', missed.id)
         } catch (err) { console.error('Shame email error:', err) }
       }
@@ -877,6 +944,10 @@ function App({ userId }) {
       const msg = String(err?.message || '')
       if (msg.includes('column') || msg.includes('proof_verifications')) {
         showToast('Database schema outdated. Run the latest SQL setup.', 'error')
+      } else if (msg) {
+        showToast(msg, 'error')
+      } else {
+        showToast('Failed to save check-in', 'error')
       }
       console.error('Check-in save error:', err)
     }
@@ -940,21 +1011,64 @@ function App({ userId }) {
     if (excuse.length < 80 || missedAvoidable === null) return
     setMissedSending(true)
 
-    const excuseId = `${missedDate}-${Date.now()}`
+    const generatedExcuseId = `${missedDate}-${Date.now()}`
     const partnerCountSnapshot = partners.length
     const requiredVotes = Math.max(Math.ceil(partnerCountSnapshot / 2), 2)
 
-    const { data: missedRow, error: insertErr } = await supabase.from('missed_days').insert({
-      user_id: userId,
-      date: missedDate,
-      excuse,
-      was_avoidable: missedAvoidable,
-      excuse_id: excuseId,
-      email_sent: false,
-      required_votes: requiredVotes,
-      partner_count_snapshot: partnerCountSnapshot,
-    }).select('id').single()
-    if (insertErr) { showToast('Failed to save excuse', 'error'); setMissedSending(false); return }
+    const { data: existingMissedRow, error: existingMissedErr } = await supabase
+      .from('missed_days')
+      .select('id, excuse_id, excuse, was_avoidable, email_sent, verdict')
+      .eq('user_id', userId)
+      .eq('date', missedDate)
+      .maybeSingle()
+    if (existingMissedErr) {
+      showToast(existingMissedErr.message || 'Failed to load existing missed day', 'error')
+      setMissedSending(false)
+      return
+    }
+
+    let missedRow = existingMissedRow
+    if (missedRow) {
+      if (missedRow.verdict) {
+        showToast('This missed day already has a final verdict', 'error')
+        setMissedSending(false)
+        await loadAll()
+        return
+      }
+      if (missedRow.email_sent) {
+        showToast('Excuse already submitted for this missed day', 'error')
+        setMissedSending(false)
+        await loadAll()
+        return
+      }
+    } else {
+      const { data: insertedRow, error: insertErr } = await supabase.from('missed_days').insert({
+        user_id: userId,
+        date: missedDate,
+        excuse,
+        was_avoidable: missedAvoidable,
+        excuse_id: generatedExcuseId,
+        email_sent: false,
+        required_votes: requiredVotes,
+        partner_count_snapshot: partnerCountSnapshot,
+      }).select('id, excuse_id, excuse, was_avoidable, email_sent').single()
+
+      if (insertErr) {
+        showToast(insertErr.message || 'Failed to save excuse', 'error')
+        setMissedSending(false)
+        return
+      }
+      missedRow = insertedRow
+    }
+
+    const activeExcuseId = missedRow?.excuse_id || generatedExcuseId
+    if (!activeExcuseId) {
+      showToast('Existing missed-day record is missing excuse id. Please contact support.', 'error')
+      setMissedSending(false)
+      return
+    }
+    const activeExcuse = missedRow?.excuse || excuse
+    const activeAvoidable = missedRow?.was_avoidable === null ? missedAvoidable : missedRow?.was_avoidable
 
     const { data: recentCheckins } = await supabase.from('checkins').select('id, date')
       .eq('user_id', userId).lt('date', missedDate).order('date', { ascending: false }).limit(365)
@@ -983,23 +1097,29 @@ function App({ userId }) {
       const tokenByEmail = await createVoteInviteLinks({
         sourceType: 'missed_day',
         sourceId: missedRow.id,
-        excuseId,
+        excuseId: activeExcuseId,
         missedDate,
-        excuseText: excuse,
+        excuseText: activeExcuse,
         emails: partners.map(p => p.email),
       })
 
-      let sentCount = 0
-      for (const p of partners) {
+      const messages = partners.map(p => {
         const token = tokenByEmail[String(p.email || '').trim().toLowerCase()]
-        if (!token) continue
+        if (!token) return null
         const base = `${VOTE_BASE_URL}?token=${encodeURIComponent(token)}`
-        await emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, {
-          to_email: p.email, missed_date: formatDate(missedDate), excuse_text: excuse,
-          was_avoidable: missedAvoidable ? 'Yes' : 'No', streak: streakBefore,
-          accept_url: base + '&vote=accept', reject_url: base + '&vote=reject',
-        }, EMAILJS_PUBLIC_KEY)
-        sentCount++
+        return {
+          to_email: p.email,
+          missed_date: formatDate(missedDate),
+          excuse_text: activeExcuse,
+          was_avoidable: activeAvoidable ? 'Yes' : 'No',
+          streak: streakBefore,
+          accept_url: base + '&vote=accept',
+          reject_url: base + '&vote=reject',
+        }
+      }).filter(Boolean)
+      const sentCount = messages.length
+      if (sentCount > 0) {
+        await sendAccountabilityEmails({ mode: 'vote', messages })
       }
       if (sentCount === 0) {
         showToast('Could not generate secure vote links', 'error')
@@ -1032,26 +1152,76 @@ function App({ userId }) {
       showToast('New deadline must be after the missed deadline', 'error')
       return
     }
+    const maxExtensionDate = dateOffset(deadlineIssue.deadline, 14)
+    if (extensionDate > maxExtensionDate) {
+      showToast(`Extension can be at most 14 days after the missed deadline (${formatDate(maxExtensionDate)})`, 'error')
+      return
+    }
     setDeadlineSending(true)
 
-    const excuseId = `${deadlineIssue.goalId}-${deadlineIssue.deadline}-${Date.now()}`
-    const excuseText = `${formatGoalDeadlineLabel(deadlineIssue.title, deadlineIssue.deadline)} — ${excuse} Requested extension to ${formatDate(extensionDate)}.`
+    const generatedExcuseId = `${deadlineIssue.goalId}-${deadlineIssue.deadline}-${Date.now()}`
     const partnerCountSnapshot = partners.length
     const requiredVotes = Math.max(Math.ceil(partnerCountSnapshot / 2), 2)
 
-    const { data: deadlineRow, error: insertErr } = await supabase.from('missed_goal_deadlines').insert({
-      user_id: userId,
-      goal_id: deadlineIssue.goalId,
-      deadline: deadlineIssue.deadline,
-      excuse,
-      requested_deadline: extensionDate,
-      was_avoidable: deadlineAvoidable,
-      excuse_id: excuseId,
-      email_sent: false,
-      required_votes: requiredVotes,
-      partner_count_snapshot: partnerCountSnapshot,
-    }).select('id').single()
-    if (insertErr) { showToast('Failed to save deadline excuse', 'error'); setDeadlineSending(false); return }
+    const { data: existingDeadlineRow, error: existingDeadlineErr } = await supabase
+      .from('missed_goal_deadlines')
+      .select('id, excuse_id, excuse, requested_deadline, was_avoidable, email_sent, verdict')
+      .eq('user_id', userId)
+      .eq('goal_id', deadlineIssue.goalId)
+      .eq('deadline', deadlineIssue.deadline)
+      .maybeSingle()
+    if (existingDeadlineErr) {
+      showToast(existingDeadlineErr.message || 'Failed to load existing deadline excuse', 'error')
+      setDeadlineSending(false)
+      return
+    }
+
+    let deadlineRow = existingDeadlineRow
+    if (deadlineRow) {
+      if (deadlineRow.verdict) {
+        showToast('This missed deadline already has a final verdict', 'error')
+        setDeadlineSending(false)
+        await loadAll()
+        return
+      }
+      if (deadlineRow.email_sent) {
+        showToast('Deadline excuse already submitted for this goal and date', 'error')
+        setDeadlineSending(false)
+        await loadAll()
+        return
+      }
+    } else {
+      const { data: insertedRow, error: insertErr } = await supabase.from('missed_goal_deadlines').insert({
+        user_id: userId,
+        goal_id: deadlineIssue.goalId,
+        deadline: deadlineIssue.deadline,
+        excuse,
+        requested_deadline: extensionDate,
+        was_avoidable: deadlineAvoidable,
+        excuse_id: generatedExcuseId,
+        email_sent: false,
+        required_votes: requiredVotes,
+        partner_count_snapshot: partnerCountSnapshot,
+      }).select('id, excuse_id, excuse, requested_deadline, was_avoidable, email_sent').single()
+
+      if (insertErr) {
+        showToast(insertErr.message || 'Failed to save deadline excuse', 'error')
+        setDeadlineSending(false)
+        return
+      }
+      deadlineRow = insertedRow
+    }
+
+    const activeExcuseId = deadlineRow?.excuse_id || generatedExcuseId
+    if (!activeExcuseId) {
+      showToast('Existing deadline record is missing excuse id. Please contact support.', 'error')
+      setDeadlineSending(false)
+      return
+    }
+    const activeExcuse = deadlineRow?.excuse || excuse
+    const activeRequestedDeadline = deadlineRow?.requested_deadline || extensionDate
+    const activeAvoidable = deadlineRow?.was_avoidable === null ? deadlineAvoidable : deadlineRow?.was_avoidable
+    const excuseText = `${formatGoalDeadlineLabel(deadlineIssue.title, deadlineIssue.deadline)} — ${activeExcuse} Requested extension to ${formatDate(activeRequestedDeadline)}.`
 
     const { data: recentCheckins } = await supabase.from('checkins').select('id, date')
       .eq('user_id', userId).lt('date', deadlineIssue.deadline).order('date', { ascending: false }).limit(365)
@@ -1080,27 +1250,29 @@ function App({ userId }) {
       const tokenByEmail = await createVoteInviteLinks({
         sourceType: 'deadline',
         sourceId: deadlineRow.id,
-        excuseId,
+        excuseId: activeExcuseId,
         missedDate: deadlineIssue.deadline,
         excuseText,
         emails: partners.map(p => p.email),
       })
 
-      let sentCount = 0
-      for (const p of partners) {
+      const messages = partners.map(p => {
         const token = tokenByEmail[String(p.email || '').trim().toLowerCase()]
-        if (!token) continue
+        if (!token) return null
         const base = `${VOTE_BASE_URL}?token=${encodeURIComponent(token)}`
-        await emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, {
+        return {
           to_email: p.email,
           missed_date: formatDate(deadlineIssue.deadline),
           excuse_text: excuseText,
-          was_avoidable: deadlineAvoidable ? 'Yes' : 'No',
+          was_avoidable: activeAvoidable ? 'Yes' : 'No',
           streak: streakBefore,
           accept_url: base + '&vote=accept',
           reject_url: base + '&vote=reject',
-        }, EMAILJS_PUBLIC_KEY)
-        sentCount++
+        }
+      }).filter(Boolean)
+      const sentCount = messages.length
+      if (sentCount > 0) {
+        await sendAccountabilityEmails({ mode: 'vote', messages })
       }
       if (sentCount === 0) {
         showToast('Could not generate secure vote links', 'error')
@@ -1309,13 +1481,16 @@ function App({ userId }) {
   if (missedDate) {
     const charCount = missedReason.trim().length
     const canSubmit = charCount >= 80 && missedAvoidable !== null && !missedSending
+    const missedPrompt = missedDate === getYesterday()
+      ? `You didn't check in yesterday. Write your excuse below. This will be emailed to ${partners.length} people who will vote on whether it's acceptable.`
+      : `You missed a check-in on this date. Write your excuse below before continuing with today's check-in. This will be emailed to ${partners.length} people who will vote on whether it's acceptable.`
     return (
       <div className="app">
         <header><h1>Daily Check-in</h1><p className="date">{dateDisplay}</p></header>
         <section className="card missed-card">
           <h2>Missed Day</h2>
           <p className="missed-date">{formatDate(missedDate)}</p>
-          <p className="missed-prompt">You didn't check in yesterday. Write your excuse below. This will be emailed to {partners.length} people who will vote on whether it's acceptable.</p>
+          <p className="missed-prompt">{missedPrompt}</p>
           <textarea className="missed-textarea" placeholder="Be honest. What happened? (at least 80 characters)"
             value={missedReason} onChange={e => setMissedReason(e.target.value)} rows={5} />
           <p className={`char-count ${charCount >= 80 ? 'met' : ''}`}>{charCount}/80 characters</p>

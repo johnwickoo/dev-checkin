@@ -1,0 +1,2 @@
+[functions.send-accountability-email]
+verify_jwt = false
