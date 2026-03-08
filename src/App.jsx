@@ -226,6 +226,12 @@ function App() {
   const [punishment, setPunishment] = useState(null)
   const [punishmentInput, setPunishmentInput] = useState('')
   const [verdictChecked, setVerdictChecked] = useState(false)
+  const [toast, setToast] = useState(null)
+
+  function showToast(message, type = 'success') {
+    setToast({ message, type })
+    setTimeout(() => setToast(null), 3000)
+  }
 
   // Check vote verdicts on load
   useEffect(() => {
@@ -305,11 +311,12 @@ function App() {
         excuseId,
         emailSent: true,
       })
+      showToast(`Excuse sent to ${ACCOUNTABILITY_EMAILS.length} accountability partners`)
       setMissedDate(null)
       setMissedReason('')
       setMissedAvoidable(null)
     } catch (err) {
-      setMissedError('Failed to send email. Check your EmailJS config.')
+      showToast('Failed to send email. Check your EmailJS config.', 'error')
       console.error('EmailJS error:', err)
     } finally {
       setMissedSending(false)
@@ -348,6 +355,7 @@ function App() {
     if (!canSave) return
     saveData(today, data)
     setSaved(true)
+    showToast('Check-in saved')
   }
 
   const completedBlocks = Object.values(data.blocks).filter(Boolean).length
@@ -664,6 +672,12 @@ function App() {
             </div>
           ))}
         </section>
+      )}
+
+      {toast && (
+        <div className={`toast toast-${toast.type}`}>
+          {toast.message}
+        </div>
       )}
     </div>
   )
