@@ -69,6 +69,8 @@ function CheerPage() {
     return d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
   }
 
+  const cheerUnlocked = !stats || stats.current_streak >= 7 || stats.has_completed_goal
+
   if (status === 'invalid') {
     return (
       <div className="app">
@@ -135,66 +137,85 @@ function CheerPage() {
         </section>
       )}
 
-      <section className="card card-accent-green">
-        <h2>Your Message</h2>
-        <form onSubmit={handleSubmit} className="cheer-form">
-          <input
-            type="email"
-            className="field-input"
-            placeholder="Your email"
-            value={email}
-            onChange={e => setEmail(e.target.value)}
-            required
-          />
-          <input
-            type="text"
-            className="field-input"
-            placeholder="Your name (optional)"
-            value={name}
-            onChange={e => setName(e.target.value)}
-            maxLength={50}
-          />
-          <textarea
-            className="field-input cheer-textarea"
-            placeholder={stats?.current_streak >= 7
-              ? `e.g., ${stats.current_streak} days strong! Keep that streak alive!`
-              : 'e.g., Keep going! Your consistency is inspiring. You\'ve got this!'}
-            value={message}
-            onChange={e => setMessage(e.target.value)}
-            maxLength={500}
-            minLength={2}
-            rows={3}
-            required
-          />
-          <div className="punish-char-count">{message.length}/500</div>
-          <button
-            className="save-btn"
-            disabled={submitting || message.trim().length < 2 || !email.includes('@')}
-          >
-            {submitting ? 'Sending...' : 'Send Encouragement'}
-          </button>
-        </form>
+      {cheerUnlocked ? (
+        <>
+          <section className="card card-accent-green">
+            <h2>Your Message</h2>
+            <form onSubmit={handleSubmit} className="cheer-form">
+              <input
+                type="email"
+                className="field-input"
+                placeholder="Your email"
+                value={email}
+                onChange={e => setEmail(e.target.value)}
+                required
+              />
+              <input
+                type="text"
+                className="field-input"
+                placeholder="Your name (optional)"
+                value={name}
+                onChange={e => setName(e.target.value)}
+                maxLength={50}
+              />
+              <textarea
+                className="field-input cheer-textarea"
+                placeholder={stats?.current_streak >= 7
+                  ? `e.g., ${stats.current_streak} days strong! Keep that streak alive!`
+                  : 'e.g., Keep going! Your consistency is inspiring. You\'ve got this!'}
+                value={message}
+                onChange={e => setMessage(e.target.value)}
+                maxLength={500}
+                minLength={2}
+                rows={3}
+                required
+              />
+              <div className="punish-char-count">{message.length}/500</div>
+              <button
+                className="save-btn"
+                disabled={submitting || message.trim().length < 2 || !email.includes('@')}
+              >
+                {submitting ? 'Sending...' : 'Send Encouragement'}
+              </button>
+            </form>
 
-        {status === 'rate_limited' && (
-          <p className="missed-error">You've sent a lot today — try again tomorrow!</p>
-        )}
-        {status === 'error' && (
-          <p className="missed-error">Something went wrong. Try again.</p>
-        )}
-      </section>
+            {status === 'rate_limited' && (
+              <p className="missed-error">You've sent a lot today — try again tomorrow!</p>
+            )}
+            {status === 'error' && (
+              <p className="missed-error">Something went wrong. Try again.</p>
+            )}
+          </section>
 
-      {submitted.length > 0 && (
-        <section className="card">
-          <h2>Sent ({submitted.length})</h2>
-          <div className="settings-list">
-            {submitted.map((s, i) => (
-              <div key={i} className="settings-item">
-                <span className="settings-item-name">{s}</span>
+          {submitted.length > 0 && (
+            <section className="card">
+              <h2>Sent ({submitted.length})</h2>
+              <div className="settings-list">
+                {submitted.map((s, i) => (
+                  <div key={i} className="settings-item">
+                    <span className="settings-item-name">{s}</span>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
-          <p className="subtitle" style={{ marginTop: '0.75rem' }}>
-            Want to send another? Go ahead — there's no such thing as too much encouragement.
+              <p className="subtitle" style={{ marginTop: '0.75rem' }}>
+                Want to send another? Go ahead — there's no such thing as too much encouragement.
+              </p>
+            </section>
+          )}
+        </>
+      ) : (
+        <section className="card cheer-locked-card">
+          <h2>Encouragement Locked</h2>
+          <p className="cheer-locked-message">
+            {stats ? (
+              <>
+                Your friend is on day <strong>{stats.current_streak}</strong> — encouragement
+                unlocks after a <strong>7-day streak</strong> or completing a goal.
+                {stats.current_streak > 0 && ` ${7 - stats.current_streak} more day${7 - stats.current_streak === 1 ? '' : 's'} to go!`}
+              </>
+            ) : (
+              'Your friend hasn\'t started checking in yet. Once they build a 7-day streak or complete a goal, you\'ll be able to send encouragement.'
+            )}
           </p>
         </section>
       )}

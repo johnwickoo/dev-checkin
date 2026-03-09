@@ -599,9 +599,49 @@ function App({ userId }) {
       .limit(5)
     setEncouragements(cheerData || [])
 
+    // Check for stale abandoned goals (30+ days, no email sent yet)
+    await checkAbandonedGoals(userPartners)
+
     await loadPendingVotes(missedDays, deadlineMisses, userPartners, userGoals)
     await loadStreakAndDots(userGoals.length)
     setLoading(false)
+  }
+
+  async function checkAbandonedGoals(partnersList) {
+    try {
+      const { data: staleGoals } = await supabase.from('goals')
+        .select('id, title, abandoned_at')
+        .eq('user_id', userId)
+        .eq('active', false)
+        .is('completed_at', null)
+        .not('abandoned_at', 'is', null)
+        .eq('abandonment_email_sent', false)
+      if (!staleGoals || staleGoals.length === 0) return
+
+      const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000).toISOString()
+      const overdue = staleGoals.filter(g => g.abandoned_at && g.abandoned_at < thirtyDaysAgo)
+      if (overdue.length === 0 || !partnersList || partnersList.length === 0) return
+
+      // Send accountability email for abandoned goals
+      const messages = partnersList.map(p => ({
+        to_email: p.email,
+        from_name: 'Accountabuddy',
+        abandoned_goals: overdue.map(g => g.title).join(', '),
+        goal_count: overdue.length,
+      }))
+
+      try {
+        await sendAccountabilityEmails({ mode: 'abandoned', messages })
+        // Mark as sent
+        for (const goal of overdue) {
+          await supabase.rpc('mark_abandonment_email_sent', { p_goal_id: goal.id })
+        }
+      } catch (err) {
+        console.error('Failed to send abandoned goal emails:', err)
+      }
+    } catch (err) {
+      console.error('Abandoned goals check failed:', err)
+    }
   }
 
   async function loadStreakAndDots(activeGoalCount = goals.length) {

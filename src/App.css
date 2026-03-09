@@ -107,6 +107,7 @@ header h1::before {
   border-radius: 4px;
   padding: 1rem 1.125rem;
   border: 1px solid #1a1a1a;
+  transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .card h2 {
@@ -140,6 +141,11 @@ header h1::before {
   border-radius: 2px;
   cursor: pointer;
   border: 1px solid transparent;
+  transition: background 0.15s ease, transform 0.1s ease;
+}
+
+.block:active {
+  transform: scale(0.985);
 }
 
 .block:hover {
@@ -163,11 +169,13 @@ header h1::before {
   display: flex;
   align-items: center;
   justify-content: center;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
 }
 
 .block.done .checkmark {
   background: #4ade80;
   border-color: #4ade80;
+  transform: scale(1.1);
 }
 
 .block.done .checkmark::after {
@@ -273,6 +281,11 @@ header h1::before {
   background: transparent;
   cursor: pointer;
   font-family: inherit;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+}
+
+.mood-btn:active {
+  transform: scale(0.95);
 }
 
 .mood-btn:hover {
@@ -396,6 +409,11 @@ header h1::before {
   font-size: 0.8rem;
   font-weight: 600;
   cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.1s ease;
+}
+
+.toggle-btn:active {
+  transform: scale(0.97);
 }
 
 .toggle-btn:hover {
@@ -438,6 +456,11 @@ header h1::before {
   font-family: inherit;
   cursor: pointer;
   letter-spacing: 0.02em;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.1s ease, opacity 0.15s ease;
+}
+
+.save-btn:active:not(:disabled) {
+  transform: scale(0.98);
 }
 
 .save-btn:hover:not(:disabled) {
@@ -463,6 +486,11 @@ header h1::before {
   height: 10px;
   border-radius: 2px;
   flex-shrink: 0;
+  transition: transform 0.1s ease;
+}
+
+.dot:hover {
+  transform: scale(1.4);
 }
 
 .dot-completed {
@@ -509,6 +537,7 @@ header h1::before {
   font-weight: 500;
   font-family: inherit;
   cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
 
 .history-toggle:hover {
@@ -624,6 +653,11 @@ header h1::before {
   font-size: 0.85rem;
   outline: none;
   margin-top: 0.375rem;
+  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+}
+
+.field-input:focus {
+  box-shadow: 0 0 0 2px #4ade8018;
 }
 
 .field-input:focus {
@@ -691,6 +725,11 @@ header h1::before {
   cursor: pointer;
   text-transform: uppercase;
   letter-spacing: 0.06em;
+  transition: background 0.15s ease, transform 0.1s ease;
+}
+
+.vote-btn:active:not(:disabled) {
+  transform: scale(0.97);
 }
 
 .vote-btn:disabled {
@@ -979,6 +1018,129 @@ header h1::before {
   margin-top: 0;
 }
 
+/* Auth mode toggle (sign in / sign up tabs) */
+.auth-mode-toggle {
+  display: flex;
+  gap: 2px;
+  background: #111;
+  border-radius: 4px;
+  padding: 3px;
+  border: 1px solid #1a1a1a;
+}
+
+.auth-mode-btn {
+  flex: 1;
+  padding: 0.5rem;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: #555;
+  font-family: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.auth-mode-btn:hover {
+  color: #888;
+}
+
+.auth-mode-active {
+  background: #1a1a1a;
+  color: #4ade80;
+}
+
+/* Auth card slide animation */
+.auth-card {
+  overflow: hidden;
+}
+
+.auth-slide-in {
+  animation: auth-slide-in 0.25s ease-out;
+}
+
+.auth-slide-out-right {
+  animation: auth-slide-out-right 0.2s ease-in forwards;
+}
+
+.auth-slide-out-left {
+  animation: auth-slide-out-left 0.2s ease-in forwards;
+}
+
+@keyframes auth-slide-in {
+  from { opacity: 0; transform: translateX(0); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes auth-slide-out-right {
+  from { opacity: 1; transform: translateX(0); }
+  to { opacity: 0; transform: translateX(30px); }
+}
+
+@keyframes auth-slide-out-left {
+  from { opacity: 1; transform: translateX(0); }
+  to { opacity: 0; transform: translateX(-30px); }
+}
+
+/* Password strength meter */
+.pw-strength {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.pw-strength-bar {
+  flex: 1;
+  height: 4px;
+  background: #1a1a1a;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.pw-strength-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.3s ease, background-color 0.3s ease;
+}
+
+.pw-weak { background-color: #ef4444; color: #ef4444; }
+.pw-fair { background-color: #f59e0b; color: #f59e0b; }
+.pw-good { background-color: #3b82f6; color: #3b82f6; }
+.pw-strong { background-color: #4ade80; color: #4ade80; }
+
+.pw-strength-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  min-width: 3rem;
+  text-align: right;
+}
+
+/* Auth hint link */
+.auth-hint {
+  margin-top: 0.75rem;
+  font-size: 0.78rem;
+  color: #555;
+  text-align: center;
+}
+
+.auth-hint-link {
+  background: none;
+  border: none;
+  color: #4ade80;
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  padding: 0;
+}
+
+.auth-hint-link:hover {
+  color: #22c55e;
+}
+
 /* Tab Navigation */
 .tab-nav {
   display: flex;
@@ -1009,6 +1171,7 @@ header h1::before {
   cursor: pointer;
   text-transform: uppercase;
   letter-spacing: 0.06em;
+  transition: background 0.15s ease, color 0.15s ease;
 }
 
 .tab-btn:hover {
@@ -1626,6 +1789,69 @@ header h1::before {
 .cheer-textarea {
   resize: vertical;
   min-height: 60px;
+}
+
+/* Cheer locked state */
+.cheer-locked-card {
+  border-left: 2px solid #6b728044;
+  text-align: center;
+}
+
+.cheer-locked-message {
+  font-size: 0.85rem;
+  color: #888;
+  line-height: 1.5;
+}
+
+.cheer-locked-message strong {
+  color: #a78bfa;
+}
+
+/* Feedback page */
+.feedback-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.feedback-textarea {
+  resize: vertical;
+  min-height: 100px;
+}
+
+.feedback-category {
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.feedback-link {
+  display: inline-block;
+  margin-top: 0.25rem;
+}
+
+/* Abandoned goals */
+.abandoned-goal-item {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.abandoned-overdue {
+  color: #f87171;
+  font-weight: 600;
+}
+
+.abandoned-reason-row {
+  display: flex;
+  gap: 0.4rem;
+  margin-top: 0.25rem;
+  width: 100%;
+}
+
+.abandoned-reason-input {
+  flex: 1;
+  font-size: 0.78rem;
 }
 
 /* Streak milestone */
@@ -2360,4 +2586,626 @@ header h1::before {
 
 :root[data-theme='light'] .cheer-highlight {
   color: #166534;
+}
+
+:root[data-theme='light'] .cheer-locked-message {
+  color: #555;
+}
+
+:root[data-theme='light'] .cheer-locked-message strong {
+  color: #7c3aed;
+}
+
+:root[data-theme='light'] .abandoned-overdue {
+  color: #dc2626;
+}
+
+:root[data-theme='light'] .cheer-locked-card {
+  border-left-color: #d1d5db;
+}
+
+:root[data-theme='light'] .auth-mode-toggle {
+  background: #f1f5f9;
+  border-color: #e2e8f0;
+}
+
+:root[data-theme='light'] .auth-mode-btn {
+  color: #94a3b8;
+}
+
+:root[data-theme='light'] .auth-mode-btn:hover {
+  color: #475569;
+}
+
+:root[data-theme='light'] .auth-mode-active {
+  background: #fff;
+  color: #166534;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+}
+
+:root[data-theme='light'] .pw-strength-bar {
+  background: #e2e8f0;
+}
+
+:root[data-theme='light'] .auth-hint {
+  color: #64748b;
+}
+
+:root[data-theme='light'] .auth-hint-link {
+  color: #166534;
+}
+
+:root[data-theme='light'] .auth-hint-link:hover {
+  color: #14532d;
+}
+
+/* ── Light theme: interactive elements ─────────────────────── */
+
+:root[data-theme='light'] .block:hover {
+  background: #f1f5f9;
+}
+
+:root[data-theme='light'] .block.done {
+  background: #f0fdf4;
+}
+
+:root[data-theme='light'] .checkmark {
+  border-color: #cbd5e1;
+}
+
+:root[data-theme='light'] .block.done .checkmark {
+  background: #166534;
+  border-color: #166534;
+}
+
+:root[data-theme='light'] .block.done .checkmark::after {
+  border-color: #fff;
+}
+
+:root[data-theme='light'] .block-name {
+  color: #475569;
+}
+
+:root[data-theme='light'] .block.done .block-name {
+  color: #0f172a;
+}
+
+/* ── Light theme: problems counter ─────────────────────────── */
+
+:root[data-theme='light'] .pm-btn {
+  border-color: #cbd5e1;
+  background: #f8fafc;
+  color: #475569;
+}
+
+:root[data-theme='light'] .pm-btn:hover:not(:disabled) {
+  border-color: #166534;
+  color: #166534;
+}
+
+:root[data-theme='light'] .problems-input {
+  color: #0f172a;
+}
+
+/* ── Light theme: mood controls ────────────────────────────── */
+
+:root[data-theme='light'] .mood-current {
+  color: #7c3aed;
+}
+
+:root[data-theme='light'] .mood-current::before {
+  color: #cbd5e1;
+}
+
+:root[data-theme='light'] .mood-btn {
+  border-color: #e2e8f0;
+}
+
+:root[data-theme='light'] .mood-btn:hover {
+  background: #f1f5f9;
+}
+
+:root[data-theme='light'] .mood-btn.active {
+  border-color: #7c3aed44;
+  background: #7c3aed0d;
+}
+
+:root[data-theme='light'] .mood-num {
+  color: #94a3b8;
+}
+
+:root[data-theme='light'] .mood-btn.active .mood-num {
+  color: #7c3aed;
+}
+
+:root[data-theme='light'] .mood-label {
+  color: #94a3b8;
+}
+
+:root[data-theme='light'] .mood-btn.active .mood-label {
+  color: #7c3aed99;
+}
+
+/* ── Light theme: missed day ───────────────────────────────── */
+
+:root[data-theme='light'] .missed-card {
+  border-color: #fca5a5;
+}
+
+:root[data-theme='light'] .missed-date {
+  color: #dc2626;
+}
+
+:root[data-theme='light'] .missed-prompt {
+  color: #475569;
+}
+
+:root[data-theme='light'] .missed-textarea {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+  color: #0f172a;
+}
+
+:root[data-theme='light'] .missed-textarea:focus {
+  border-color: #94a3b8;
+  box-shadow: 0 0 0 2px #16653418;
+}
+
+:root[data-theme='light'] .missed-textarea::placeholder {
+  color: #94a3b8;
+}
+
+:root[data-theme='light'] .char-count {
+  color: #dc2626;
+}
+
+:root[data-theme='light'] .char-count.met {
+  color: #166534;
+}
+
+:root[data-theme='light'] .missed-error {
+  color: #dc2626;
+}
+
+:root[data-theme='light'] .avoidable-label {
+  color: #475569;
+}
+
+/* ── Light theme: toggle buttons ───────────────────────────── */
+
+:root[data-theme='light'] .toggle-btn {
+  border-color: #e2e8f0;
+  color: #64748b;
+}
+
+:root[data-theme='light'] .toggle-btn:hover {
+  background: #f1f5f9;
+}
+
+:root[data-theme='light'] .toggle-active.toggle-yes {
+  border-color: #fca5a5;
+  background: #fef2f2;
+  color: #dc2626;
+}
+
+:root[data-theme='light'] .toggle-active.toggle-no {
+  border-color: #86efac;
+  background: #f0fdf4;
+  color: #166534;
+}
+
+/* ── Light theme: vote page ────────────────────────────────── */
+
+:root[data-theme='light'] .vote-excuse {
+  color: #1e293b;
+}
+
+:root[data-theme='light'] .vote-prompt {
+  color: #475569;
+}
+
+:root[data-theme='light'] .vote-accept {
+  border-color: #86efac;
+  background: #f0fdf4;
+  color: #166534;
+}
+
+:root[data-theme='light'] .vote-accept:hover:not(:disabled) {
+  background: #dcfce7;
+}
+
+:root[data-theme='light'] .vote-reject {
+  border-color: #fca5a5;
+  background: #fef2f2;
+  color: #dc2626;
+}
+
+:root[data-theme='light'] .vote-reject:hover:not(:disabled) {
+  background: #fee2e2;
+}
+
+:root[data-theme='light'] .vote-thanks {
+  color: #475569;
+}
+
+:root[data-theme='light'] .vote-result.accept {
+  color: #166534;
+}
+
+:root[data-theme='light'] .vote-result.reject {
+  color: #dc2626;
+}
+
+:root[data-theme='light'] .vote-sub {
+  color: #64748b;
+}
+
+/* ── Light theme: punishment ───────────────────────────────── */
+
+:root[data-theme='light'] .punishment-card {
+  border-color: #fca5a5;
+  background: #fff;
+}
+
+:root[data-theme='light'] .punishment-date {
+  color: #dc2626;
+}
+
+:root[data-theme='light'] .verdict-reject {
+  color: #dc2626;
+}
+
+:root[data-theme='light'] .verdict-accept {
+  color: #166534;
+}
+
+:root[data-theme='light'] .verdict-sep {
+  color: #cbd5e1;
+}
+
+:root[data-theme='light'] .punishment-excuse {
+  background: #fef2f2;
+  border-left-color: #fca5a5;
+  color: #475569;
+}
+
+:root[data-theme='light'] .punishment-message p {
+  color: #1e293b;
+}
+
+:root[data-theme='light'] .punishment-message p:last-child {
+  color: #dc2626;
+}
+
+:root[data-theme='light'] .punishment-gate {
+  border-top-color: #e2e8f0;
+}
+
+:root[data-theme='light'] .punishment-instruction {
+  color: #64748b;
+}
+
+:root[data-theme='light'] .punishment-instruction strong {
+  color: #334155;
+}
+
+:root[data-theme='light'] .punishment-match {
+  border-color: #86efac !important;
+  color: #166534 !important;
+}
+
+:root[data-theme='light'] .punishment-task-block {
+  background: #fef2f2;
+  border-color: #fca5a5;
+}
+
+:root[data-theme='light'] .punishment-task-inline {
+  background: #fef2f2;
+  border-color: #fca5a5;
+}
+
+:root[data-theme='light'] .punishment-task-inline h3 {
+  color: #dc2626;
+}
+
+/* ── Light theme: dot grid ─────────────────────────────────── */
+
+:root[data-theme='light'] .dot-completed {
+  background: #166534;
+}
+
+:root[data-theme='light'] .dot-missed {
+  background: #dc2626;
+}
+
+:root[data-theme='light'] .dot-partial {
+  background: #ca8a04;
+}
+
+:root[data-theme='light'] .dot-none {
+  background: #e2e8f0;
+}
+
+:root[data-theme='light'] .dot-legend {
+  color: #64748b;
+}
+
+/* ── Light theme: history ──────────────────────────────────── */
+
+:root[data-theme='light'] .history-empty {
+  color: #64748b;
+}
+
+:root[data-theme='light'] .history-date {
+  color: #334155;
+}
+
+:root[data-theme='light'] .badge-done {
+  background: #f0fdf4;
+  color: #166534;
+  border-color: #86efac;
+}
+
+:root[data-theme='light'] .badge-missed {
+  background: #fef2f2;
+  color: #dc2626;
+  border-color: #fca5a5;
+}
+
+:root[data-theme='light'] .history-reason {
+  color: #475569;
+}
+
+:root[data-theme='light'] .history-learned,
+:root[data-theme='light'] .history-built {
+  color: #475569;
+}
+
+:root[data-theme='light'] .history-link {
+  color: #7c3aed;
+}
+
+:root[data-theme='light'] .history-link:hover {
+  color: #6d28d9;
+}
+
+/* ── Light theme: field focus glow ─────────────────────────── */
+
+:root[data-theme='light'] .field-input:focus,
+:root[data-theme='light'] .field-textarea:focus {
+  border-color: #94a3b8;
+  box-shadow: 0 0 0 2px #16653418;
+}
+
+/* ── Light theme: rest days ────────────────────────────────── */
+
+:root[data-theme='light'] .rest-day-btn {
+  border-color: #e2e8f0;
+  color: #64748b;
+}
+
+:root[data-theme='light'] .rest-day-btn:hover {
+  background: #f1f5f9;
+}
+
+:root[data-theme='light'] .rest-day-active {
+  border-color: #7c3aed44;
+  background: #f5f3ff;
+  color: #7c3aed;
+}
+
+/* ── Light theme: proof images ─────────────────────────────── */
+
+:root[data-theme='light'] .proof-img,
+:root[data-theme='light'] .history-proof-img {
+  border-color: #cbd5e1;
+}
+
+/* ── Light theme: settings items ───────────────────────────── */
+
+:root[data-theme='light'] .settings-item-name {
+  color: #0f172a;
+}
+
+:root[data-theme='light'] .settings-remove {
+  border-color: #fca5a566;
+}
+
+:root[data-theme='light'] .settings-remove:hover {
+  background: #fef2f2;
+}
+
+/* ── Light theme: card accents ─────────────────────────────── */
+
+:root[data-theme='light'] .card-accent-green {
+  border-left-color: #16653466;
+}
+
+:root[data-theme='light'] .card-accent-purple {
+  border-left-color: #7c3aed44;
+}
+
+:root[data-theme='light'] .card-accent-red {
+  border-left-color: #dc262644;
+}
+
+:root[data-theme='light'] .card-accent-cheer {
+  border-left-color: #2563eb44;
+}
+
+:root[data-theme='light'] .card-accent-vote {
+  border-left-color: #ca8a0444;
+}
+
+/* ── Light theme: day done card ────────────────────────────── */
+
+:root[data-theme='light'] .day-done-card {
+  border-left-color: #16653470;
+  background: linear-gradient(180deg, #f0fdf4 0%, #fff 100%);
+}
+
+:root[data-theme='light'] .day-done-card h2 {
+  color: #166534;
+}
+
+:root[data-theme='light'] .day-done-text {
+  color: #1e293b;
+}
+
+:root[data-theme='light'] .day-done-sub {
+  color: #475569;
+}
+
+/* ── Light theme: goal cycle card ──────────────────────────── */
+
+:root[data-theme='light'] .verification-summary-card,
+:root[data-theme='light'] .goal-cycle-card {
+  border-left-color: #ca8a0466;
+}
+
+:root[data-theme='light'] .goal-cycle-text {
+  color: #1e293b;
+}
+
+:root[data-theme='light'] .goal-cycle-sub {
+  color: #475569;
+}
+
+/* ── Light theme: toast ────────────────────────────────────── */
+
+:root[data-theme='light'] .toast-success {
+  background: #f0fdf4;
+  color: #166534;
+  border-color: #86efac;
+}
+
+:root[data-theme='light'] .toast-error {
+  background: #fef2f2;
+  color: #dc2626;
+  border-color: #fca5a5;
+}
+
+/* ── Light theme: theme toggle ─────────────────────────────── */
+
+:root[data-theme='light'] .theme-toggle {
+  border-color: #e2e8f0;
+  background: #f8fafc;
+  color: #475569;
+}
+
+:root[data-theme='light'] .theme-toggle:hover {
+  border-color: #cbd5e1;
+}
+
+:root[data-theme='light'] .theme-toggle-switch {
+  border-color: #cbd5e1;
+  background: #e2e8f0;
+}
+
+:root[data-theme='light'] .theme-toggle-switch-on {
+  background: #dcfce7;
+  border-color: #86efac;
+}
+
+:root[data-theme='light'] .theme-toggle-thumb {
+  background: #64748b;
+}
+
+:root[data-theme='light'] .theme-toggle-switch-on .theme-toggle-thumb {
+  background: #166534;
+}
+
+/* ── Light theme: goal stats ───────────────────────────────── */
+
+:root[data-theme='light'] .goal-stat-name {
+  color: #0f172a;
+}
+
+:root[data-theme='light'] .goal-stat-pct {
+  color: #475569;
+}
+
+:root[data-theme='light'] .goal-deadline {
+  color: #64748b;
+}
+
+/* ── Light theme: stats page ───────────────────────────────── */
+
+:root[data-theme='light'] .stat-value {
+  color: #0f172a;
+}
+
+:root[data-theme='light'] .stat-value.stat-good {
+  color: #166534;
+}
+
+:root[data-theme='light'] .stat-value.stat-bad {
+  color: #dc2626;
+}
+
+:root[data-theme='light'] .stat-label {
+  color: #475569;
+}
+
+:root[data-theme='light'] .stat-sub {
+  color: #64748b;
+}
+
+:root[data-theme='light'] .stats-empty {
+  color: #64748b;
+}
+
+:root[data-theme='light'] .mood-bar-track {
+  background: #f1f5f9;
+}
+
+:root[data-theme='light'] .mood-bar-val {
+  color: #475569;
+}
+
+:root[data-theme='light'] .mood-bar-label {
+  color: #64748b;
+}
+
+:root[data-theme='light'] .mood-bar-count {
+  color: #94a3b8;
+}
+
+:root[data-theme='light'] .mood-chart-legend {
+  color: #64748b;
+}
+
+:root[data-theme='light'] .bar-low {
+  background: #dc2626;
+}
+
+:root[data-theme='light'] .bar-mid {
+  background: #ca8a04;
+}
+
+:root[data-theme='light'] .bar-high {
+  background: #166534;
+}
+
+/* ── Light theme: streak milestone ─────────────────────────── */
+
+:root[data-theme='light'] .streak-milestone {
+  color: #b45309;
+}
+
+/* ── Light theme: punish page form ─────────────────────────── */
+
+:root[data-theme='light'] .punish-form .field-input,
+:root[data-theme='light'] .cheer-form .field-input,
+:root[data-theme='light'] .feedback-form .field-input,
+:root[data-theme='light'] .feedback-form .feedback-category {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+  color: #0f172a;
+}
+
+/* ── Light theme: card hover lift ──────────────────────────── */
+
+:root[data-theme='light'] .card:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
 }

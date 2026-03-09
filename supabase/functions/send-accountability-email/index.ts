@@ -1,7 +1,7 @@
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
-type EmailMode = 'vote' | 'shame'
+type EmailMode = 'vote' | 'shame' | 'abandoned'
 type EmailPayload = {
   to_email: string
   [key: string]: string | number | boolean | null | undefined
@@ -178,7 +178,7 @@ serve(async req => {
     }
 
     const { mode, messages } = (await req.json()) as RequestBody
-    if (mode !== 'vote' && mode !== 'shame') {
+    if (mode !== 'vote' && mode !== 'shame' && mode !== 'abandoned') {
       return new Response(JSON.stringify({ success: false, error: 'Invalid mode' }), {
         status: 400,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -194,10 +194,11 @@ serve(async req => {
     const serviceId = getRequiredEnv('EMAILJS_SERVICE_ID')
     const voteTemplate = getRequiredEnv('EMAILJS_TEMPLATE_ID')
     const shameTemplate = getRequiredEnv('EMAILJS_SHAME_TEMPLATE')
+    const abandonedTemplate = Deno.env.get('EMAILJS_ABANDONED_TEMPLATE') || shameTemplate
     const publicKey = getRequiredEnv('EMAILJS_PUBLIC_KEY')
     const privateKey = Deno.env.get('EMAILJS_PRIVATE_KEY')
 
-    const templateId = mode === 'vote' ? voteTemplate : shameTemplate
+    const templateId = mode === 'vote' ? voteTemplate : mode === 'abandoned' ? abandonedTemplate : shameTemplate
     const appBaseUrl = detectAppBaseUrl(req, messages)
     const punishmentSuggestLink = appBaseUrl
       ? `${appBaseUrl}/punish?for=${authData.user.id}`

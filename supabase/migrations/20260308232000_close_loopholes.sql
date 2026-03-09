@@ -118,6 +118,8 @@ alter table missed_goal_deadlines
 
 -- Block direct deletes on punishment_tasks
 drop policy if exists "Users manage own punishment tasks" on punishment_tasks;
+drop policy if exists "Users read own punishment tasks" on punishment_tasks;
+drop policy if exists "Users update own punishment tasks" on punishment_tasks;
 create policy "Users read own punishment tasks"
   on punishment_tasks for select using (auth.uid() = user_id);
 create policy "Users update own punishment tasks"

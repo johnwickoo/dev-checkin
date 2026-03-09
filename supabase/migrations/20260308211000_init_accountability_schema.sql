@@ -476,6 +476,7 @@ create policy "Users read own vote invites"
 -- ══════════════════════════════════════════════════════════════
 -- 9. Voting RPC (secure)
 -- ══════════════════════════════════════════════════════════════
+drop function if exists resolve_excuse_verdict_internal(text, uuid);
 create or replace function resolve_excuse_verdict_internal(p_source_type text, p_source_id uuid)
 returns text
 language plpgsql
@@ -565,6 +566,7 @@ begin
 end;
 $$;
 
+drop function if exists create_excuse_vote_invites(text, uuid, text, text, text, text[]);
 create or replace function create_excuse_vote_invites(
   p_source_type text,
   p_source_id uuid,
@@ -664,6 +666,7 @@ begin
 end;
 $$;
 
+drop function if exists get_excuse_vote_context(text);
 create or replace function get_excuse_vote_context(p_token text)
 returns table(
   status text,
@@ -719,6 +722,7 @@ begin
 end;
 $$;
 
+drop function if exists cast_excuse_vote(text, text);
 create or replace function cast_excuse_vote(p_token text, p_vote text)
 returns table(
   status text,

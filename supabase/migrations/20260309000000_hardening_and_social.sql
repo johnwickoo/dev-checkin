@@ -326,6 +326,7 @@ create policy "Anyone can insert encouragements"
 -- No UPDATE or DELETE — encouragements are permanent
 
 -- Rate-limited submission via RPC
+drop function if exists submit_encouragement(uuid, text, text, text);
 create or replace function submit_encouragement(
   p_user_id uuid,
   p_email text,
@@ -384,6 +385,7 @@ grant execute on function submit_encouragement(uuid, text, text, text) to anon, 
 -- Partners need context when sending encouragement. This RPC
 -- returns limited, non-sensitive stats for a given user.
 
+drop function if exists get_public_user_stats(uuid);
 create or replace function get_public_user_stats(p_user_id uuid)
 returns table(
   current_streak int,

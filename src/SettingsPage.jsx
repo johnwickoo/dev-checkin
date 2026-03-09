@@ -6,6 +6,8 @@ const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 function SettingsPage({ userId, onSetupComplete, onSkip, onLogout, theme = 'dark', onToggleTheme }) {
   const [goals, setGoals] = useState([])
   const [completedGoals, setCompletedGoals] = useState([])
+  const [abandonedGoals, setAbandonedGoals] = useState([])
+  const [abandonedReasons, setAbandonedReasons] = useState({})
   const [partners, setPartners] = useState([])
   const [newGoal, setNewGoal] = useState('')
   const [newDeadline, setNewDeadline] = useState('')
@@ -27,15 +29,18 @@ function SettingsPage({ userId, onSetupComplete, onSkip, onLogout, theme = 'dark
 
   async function loadData() {
     setLoading(true)
-    const [goalsRes, completedGoalsRes, partnersRes, settingsRes] = await Promise.all([
+    const [goalsRes, completedGoalsRes, abandonedRes, partnersRes, settingsRes] = await Promise.all([
       supabase.from('goals').select('*').eq('user_id', userId).eq('active', true).order('created_at'),
       supabase.from('goals').select('*').eq('user_id', userId).not('completed_at', 'is', null)
         .order('completed_at', { ascending: false }).limit(20),
+      supabase.from('goals').select('*').eq('user_id', userId).eq('active', false).is('completed_at', null)
+        .not('abandoned_at', 'is', null).order('abandoned_at', { ascending: false }),
       supabase.from('accountability_partners').select('*').eq('user_id', userId).order('created_at'),
       supabase.from('user_settings').select('*').eq('user_id', userId).maybeSingle(),
     ])
     if (goalsRes.data) setGoals(goalsRes.data)
     if (completedGoalsRes.data) setCompletedGoals(completedGoalsRes.data)
+    if (abandonedRes.data) setAbandonedGoals(abandonedRes.data)
     if (partnersRes.data) setPartners(partnersRes.data)
 
     // Load rest days from server (fall back to localStorage for migration)
@@ -83,8 +88,12 @@ function SettingsPage({ userId, onSetupComplete, onSkip, onLogout, theme = 'dark
       return
     }
     await supabase.from('goals').update({ active: false, completed_at: null }).eq('id', id)
+    const goal = goals.find(g => g.id === id)
     setGoals(prev => prev.filter(g => g.id !== id))
     setCompletedGoals(prev => prev.filter(g => g.id !== id))
+    if (goal) {
+      setAbandonedGoals(prev => [{ ...goal, active: false, abandoned_at: new Date().toISOString() }, ...prev])
+    }
   }
 
   async function completeGoal(id) {
@@ -104,6 +113,23 @@ function SettingsPage({ userId, onSetupComplete, onSkip, onLogout, theme = 'dark
     if (goal) {
       setGoals(prev => [...prev, { ...goal, active: true, completed_at: null }])
     }
+  }
+
+  async function reactivateAbandoned(id) {
+    await supabase.from('goals').update({ active: true, completed_at: null }).eq('id', id)
+    const goal = abandonedGoals.find(g => g.id === id)
+    setAbandonedGoals(prev => prev.filter(g => g.id !== id))
+    if (goal) {
+      setGoals(prev => [...prev, { ...goal, active: true, completed_at: null, abandoned_at: null, abandoned_reason: null }])
+    }
+  }
+
+  async function submitAbandonedReason(id) {
+    const reason = (abandonedReasons[id] || '').trim()
+    if (!reason) return
+    await supabase.rpc('submit_abandonment_reason', { p_goal_id: id, p_reason: reason })
+    setAbandonedGoals(prev => prev.map(g => g.id === id ? { ...g, abandoned_reason: reason } : g))
+    setAbandonedReasons(prev => { const next = { ...prev }; delete next[id]; return next })
   }
 
   async function addPartner() {
@@ -253,6 +279,57 @@ function SettingsPage({ userId, onSetupComplete, onSkip, onLogout, theme = 'dark
         </section>
       )}
 
+      {abandonedGoals.length > 0 && (
+        <section className="card card-accent-red">
+          <h2>Abandoned Goals ({abandonedGoals.length})</h2>
+          <p className="subtitle">
+            Goals you dropped. After 30 days, your accountability partners will be notified.
+          </p>
+          <div className="settings-list">
+            {abandonedGoals.map(goal => {
+              const daysAgo = goal.abandoned_at
+                ? Math.floor((Date.now() - new Date(goal.abandoned_at).getTime()) / 86400000)
+                : 0
+              return (
+                <div key={goal.id} className="settings-item abandoned-goal-item">
+                  <div className="settings-item-info">
+                    <span className="settings-item-name">{goal.title}</span>
+                    <span className={`settings-item-sub ${daysAgo >= 30 ? 'abandoned-overdue' : ''}`}>
+                      dropped {daysAgo} day{daysAgo === 1 ? '' : 's'} ago
+                      {daysAgo >= 30 && ' — partners notified'}
+                    </span>
+                    {goal.abandoned_reason ? (
+                      <span className="settings-item-sub">Reason: {goal.abandoned_reason}</span>
+                    ) : (
+                      <div className="abandoned-reason-row">
+                        <input
+                          type="text"
+                          className="field-input abandoned-reason-input"
+                          placeholder="Why did you drop this?"
+                          value={abandonedReasons[goal.id] || ''}
+                          onChange={e => setAbandonedReasons(prev => ({ ...prev, [goal.id]: e.target.value }))}
+                          maxLength={200}
+                        />
+                        <button
+                          className="save-btn settings-add-btn"
+                          disabled={!(abandonedReasons[goal.id] || '').trim()}
+                          onClick={() => submitAbandonedReason(goal.id)}
+                        >
+                          Save
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                  <button className="history-toggle settings-reactivate" onClick={() => reactivateAbandoned(goal.id)}>
+                    Reactivate
+                  </button>
+                </div>
+              )
+            })}
+          </div>
+        </section>
+      )}
+
       <section className="card">
         <h2>Accountability Partners ({partners.length})</h2>
         <p className="subtitle">
@@ -357,6 +434,7 @@ function SettingsPage({ userId, onSetupComplete, onSkip, onLogout, theme = 'dark
         <h2>Encouragement Link</h2>
         <p className="subtitle">
           Share this with friends so they can send you encouragement. Auto-included in accountability emails.
+          Unlocks for friends after a 7-day streak or completing a goal.
         </p>
         <div className="settings-add">
           <input
@@ -430,6 +508,14 @@ function SettingsPage({ userId, onSetupComplete, onSkip, onLogout, theme = 'dark
           )}
         </section>
       )}
+
+      <section className="card">
+        <h2>Feedback</h2>
+        <p className="subtitle">We're in v1 — your input shapes what we build next.</p>
+        <a href="/feedback" target="_blank" className="history-toggle feedback-link">
+          Send us feedback
+        </a>
+      </section>
 
       {error && <p className="missed-error">{error}</p>}
 
