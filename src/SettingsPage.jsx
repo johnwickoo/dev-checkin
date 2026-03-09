@@ -219,13 +219,11 @@ function SettingsPage({ userId, onSetupComplete, onSkip, onLogout, theme = 'dark
             onKeyDown={e => e.key === 'Enter' && addGoal()}
           />
           <input
-            type="text"
+            type="date"
             className="field-input settings-date-input"
-            placeholder="Deadline (YYYY-MM-DD)"
             value={newDeadline}
             onChange={e => setNewDeadline(e.target.value)}
-            pattern="\d{4}-\d{2}-\d{2}"
-            maxLength={10}
+            min={new Date().toISOString().split('T')[0]}
           />
           <button className="save-btn settings-add-btn" onClick={addGoal} disabled={saving || !newGoal.trim()}>
             Add Goal

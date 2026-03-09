@@ -378,3 +378,85 @@ $$;
 
 revoke all on function submit_encouragement(uuid, text, text, text) from public;
 grant execute on function submit_encouragement(uuid, text, text, text) to anon, authenticated;
+
+
+-- ─── 5. Public user stats for cheer page ──────────────────
+-- Partners need context when sending encouragement. This RPC
+-- returns limited, non-sensitive stats for a given user.
+
+create or replace function get_public_user_stats(p_user_id uuid)
+returns table(
+  current_streak int,
+  total_checkins int,
+  active_goal_count int,
+  latest_mood int,
+  member_since date
+)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_streak int := 0;
+  v_total int := 0;
+  v_goals int := 0;
+  v_mood int := 0;
+  v_since date;
+  v_today date := timezone('utc', now())::date;
+  v_date date;
+  v_rest_days int[];
+  v_dow int;
+begin
+  -- Total checkins
+  select count(*) into v_total
+  from checkins where user_id = p_user_id;
+
+  if v_total = 0 then
+    return query select 0, 0, 0, 0, null::date;
+    return;
+  end if;
+
+  -- Active goals
+  select count(*) into v_goals
+  from goals where user_id = p_user_id and active = true;
+
+  -- Latest mood
+  select mood into v_mood
+  from checkins where user_id = p_user_id and mood is not null
+  order by date desc limit 1;
+
+  -- Member since
+  select min(created_at)::date into v_since
+  from checkins where user_id = p_user_id;
+
+  -- Rest days
+  select rest_days into v_rest_days
+  from user_settings where user_id = p_user_id;
+  v_rest_days := coalesce(v_rest_days, '{}');
+
+  -- Current streak (simplified: count consecutive days with checkins going backward)
+  v_date := v_today;
+  loop
+    v_dow := extract(dow from v_date)::int;
+    if v_rest_days @> array[v_dow] then
+      v_date := v_date - 1;
+      continue;
+    end if;
+
+    if exists (select 1 from checkins where user_id = p_user_id and date = v_date) then
+      v_streak := v_streak + 1;
+      v_date := v_date - 1;
+    else
+      exit;
+    end if;
+
+    -- Safety: don't go back more than 365 days
+    if v_today - v_date > 365 then exit; end if;
+  end loop;
+
+  return query select v_streak, v_total, v_goals, coalesce(v_mood, 0), v_since;
+end;
+$$;
+
+revoke all on function get_public_user_stats(uuid) from public;
+grant execute on function get_public_user_stats(uuid) to anon, authenticated;
