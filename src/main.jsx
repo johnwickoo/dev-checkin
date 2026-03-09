@@ -10,6 +10,7 @@ const StatsPage = lazy(() => import('./StatsPage.jsx'))
 const SettingsPage = lazy(() => import('./SettingsPage.jsx'))
 const VotePage = lazy(() => import('./VotePage.jsx'))
 const PunishPage = lazy(() => import('./PunishPage.jsx'))
+const CheerPage = lazy(() => import('./CheerPage.jsx'))
 const THEME_STORAGE_KEY = 'ui_theme_mode'
 
 function toDateKey(date) {
@@ -96,17 +97,19 @@ function TabNav({ tab, setTab }) {
   )
 }
 
-// Check and show notification reminder
-function checkNotificationReminder(userId) {
-  if (Notification.permission !== 'granted') return
-  const hour = parseInt(localStorage.getItem(`reminder_hour_${userId}`) || '21', 10)
+// Check and show notification reminder (uses server-side reminder_hour)
+async function checkNotificationReminder(userId) {
+  if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return
   const now = new Date()
-  if (now.getHours() < hour) return
-
-  // Check if we already notified today
   const today = toDateKey(now)
   const lastNotified = localStorage.getItem(`last_notified_${userId}`)
   if (lastNotified === today) return
+
+  // Fetch reminder hour from server settings
+  const { data: settings } = await supabase.from('user_settings')
+    .select('reminder_hour').eq('user_id', userId).maybeSingle()
+  const hour = settings?.reminder_hour ?? 21
+  if (now.getHours() < hour) return
 
   localStorage.setItem(`last_notified_${userId}`, today)
   new Notification('Accountabuddy Reminder', {
@@ -230,6 +233,7 @@ function Router() {
   const path = window.location.pathname
   if (path === '/vote') return <Suspense fallback={<LoadingFallback />}><VotePage /></Suspense>
   if (path === '/punish') return <Suspense fallback={<LoadingFallback />}><PunishPage /></Suspense>
+  if (path === '/cheer') return <Suspense fallback={<LoadingFallback />}><CheerPage /></Suspense>
   return <Main />
 }
 

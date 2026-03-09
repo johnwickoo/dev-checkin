@@ -68,6 +68,7 @@ function normalizeTemplateParams(
   msg: EmailPayload,
   mode: EmailMode,
   fallbackPunishLink: string | null,
+  fallbackCheerLink: string | null,
 ): EmailPayload {
   const normalized: EmailPayload = { ...msg }
 
@@ -96,6 +97,10 @@ function normalizeTemplateParams(
 
   if (fallbackPunishLink && !normalized.punish_link) {
     normalized.punish_link = fallbackPunishLink
+  }
+
+  if (fallbackCheerLink && !normalized.cheer_link) {
+    normalized.cheer_link = fallbackCheerLink
   }
 
   return normalized
@@ -197,6 +202,9 @@ serve(async req => {
     const punishmentSuggestLink = appBaseUrl
       ? `${appBaseUrl}/punish?for=${authData.user.id}`
       : null
+    const cheerLink = appBaseUrl
+      ? `${appBaseUrl}/cheer?for=${authData.user.id}`
+      : null
 
     let sent = 0
     const failures: Array<{ to_email: string; error: string }> = []
@@ -208,7 +216,7 @@ serve(async req => {
         continue
       }
       // Hardening + compatibility: enforce server-side punish link and normalize template variable names.
-      const safeMsg = normalizeTemplateParams(msg, mode, punishmentSuggestLink)
+      const safeMsg = normalizeTemplateParams(msg, mode, punishmentSuggestLink, cheerLink)
       const result = await sendViaEmailJs(serviceId, templateId, publicKey, privateKey, safeMsg)
       if (result.ok) {
         sent += 1

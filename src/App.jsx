@@ -288,6 +288,9 @@ function App({ userId }) {
   const [punishmentTasks, setPunishmentTasks] = useState([])
   const [punishmentTaskProof, setPunishmentTaskProof] = useState({})
 
+  // Encouragements from partners
+  const [encouragements, setEncouragements] = useState([])
+
   // UI
   const [saveStatus, setSaveStatus] = useState('idle') // idle | saving | saved | error
   const [loading, setLoading] = useState(true)
@@ -588,6 +591,14 @@ function App({ userId }) {
     for (const t of (pTasks || [])) proofState[t.id] = t.proof_url || ''
     setPunishmentTaskProof(proofState)
 
+    // Load encouragements (most recent 5)
+    const { data: cheerData } = await supabase.from('encouragements')
+      .select('id, sender_name, sender_email, message, created_at')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(5)
+    setEncouragements(cheerData || [])
+
     await loadPendingVotes(missedDays, deadlineMisses, userPartners, userGoals)
     await loadStreakAndDots(userGoals.length)
     setLoading(false)
@@ -714,7 +725,7 @@ function App({ userId }) {
             punishment: formatPunishmentChoice(missed.selected_punishment),
           }))
           await sendAccountabilityEmails({ mode: 'shame', messages })
-          await supabase.from('missed_goal_deadlines').update({ shame_email_sent: true }).eq('id', missed.id)
+          await supabase.rpc('mark_shame_email_sent', { p_source_type: 'deadline', p_source_id: missed.id })
         } catch (err) { console.error('Deadline shame email error:', err) }
       }
       if (!missed.punishment_acknowledged) {
@@ -751,7 +762,7 @@ function App({ userId }) {
               punishment: formatPunishmentChoice(missed.selected_punishment),
             }))
           await sendAccountabilityEmails({ mode: 'shame', messages })
-          await supabase.from('missed_days').update({ shame_email_sent: true }).eq('id', missed.id)
+          await supabase.rpc('mark_shame_email_sent', { p_source_type: 'missed_day', p_source_id: missed.id })
         } catch (err) { console.error('Shame email error:', err) }
       }
       if (!missed.punishment_acknowledged) {
@@ -1163,7 +1174,7 @@ function App({ userId }) {
       if (sentCount === 0) {
         showToast('Could not generate secure vote links', 'error')
       } else {
-        await supabase.from('missed_days').update({ email_sent: true }).eq('id', missedRow.id)
+        await supabase.rpc('mark_excuse_emails_sent', { p_source_type: 'missed_day', p_source_id: missedRow.id })
         sentSuccessfully = true
         showToast(`Excuse sent to ${sentCount} accountability partners`)
       }
@@ -1316,7 +1327,7 @@ function App({ userId }) {
       if (sentCount === 0) {
         showToast('Could not generate secure vote links', 'error')
       } else {
-        await supabase.from('missed_goal_deadlines').update({ email_sent: true }).eq('id', deadlineRow.id)
+        await supabase.rpc('mark_excuse_emails_sent', { p_source_type: 'deadline', p_source_id: deadlineRow.id })
         sentSuccessfully = true
         showToast(`Deadline excuse sent to ${sentCount} accountability partners`)
       }
@@ -1597,6 +1608,9 @@ function App({ userId }) {
             {streak} day streak
             {verifiedStreak !== streak && <span className="streak-verified"> ({verifiedStreak} verified)</span>}
             {streakPaused && <span className="streak-paused"> paused</span>}
+            {[7, 14, 30, 60, 100, 200, 365].includes(streak) && (
+              <span className="streak-milestone"> Milestone!</span>
+            )}
           </p>
         )}
         {noActiveGoals && (
@@ -1631,6 +1645,21 @@ function App({ userId }) {
           {streak > 0 && (
             <p className="goal-cycle-sub">Streak paused at {streak} day{streak === 1 ? '' : 's'}.</p>
           )}
+        </section>
+      )}
+
+      {/* Encouragements from partners */}
+      {encouragements.length > 0 && (
+        <section className="card card-accent-cheer">
+          <h2>From Your People</h2>
+          <div className="cheer-list">
+            {encouragements.map(e => (
+              <div key={e.id} className="cheer-item">
+                <p className="cheer-message">"{e.message}"</p>
+                <span className="cheer-sender">— {e.sender_name || e.sender_email.split('@')[0]}</span>
+              </div>
+            ))}
+          </div>
         </section>
       )}
 

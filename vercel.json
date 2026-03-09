@@ -1,6 +1,7 @@
 {
   "rewrites": [
     { "source": "/vote", "destination": "/index.html" },
-    { "source": "/punish", "destination": "/index.html" }
+    { "source": "/punish", "destination": "/index.html" },
+    { "source": "/cheer", "destination": "/index.html" }
   ]
 }

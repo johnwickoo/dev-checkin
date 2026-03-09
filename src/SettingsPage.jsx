@@ -355,10 +355,36 @@ function SettingsPage({ userId, onSetupComplete, onSkip, onLogout, theme = 'dark
         )}
       </section>
 
+      <section className="card card-accent-green">
+        <h2>Encouragement Link</h2>
+        <p className="subtitle">
+          Share this with friends so they can send you encouragement. Auto-included in accountability emails.
+        </p>
+        <div className="settings-add">
+          <input
+            type="text"
+            className="field-input"
+            readOnly
+            value={`${window.location.origin}/cheer?for=${userId}`}
+            onFocus={e => e.target.select()}
+          />
+          <button
+            className="save-btn settings-add-btn"
+            onClick={() => {
+              navigator.clipboard.writeText(`${window.location.origin}/cheer?for=${userId}`)
+              setError('Link copied!')
+              setTimeout(() => setError(''), 2000)
+            }}
+          >
+            Copy Link
+          </button>
+        </div>
+      </section>
+
       <section className="card card-accent-red">
         <h2>Punishment Suggestions</h2>
         <p className="subtitle">
-          This link is auto-included in accountability emails by the server. Share manually only if you want extra suggestions.
+          Auto-included in accountability emails. Share manually only if you want extra suggestions.
         </p>
         <div className="settings-add">
           <input
