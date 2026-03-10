@@ -1,16 +1,49 @@
-# React + Vite
+# Accountabuddy
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+**The accountability app that won't let you off the hook.**
 
-Currently, two official plugins are available:
+Accountabuddy turns your goals into commitments by bringing real people into the loop. Miss a day? Your partners vote on whether your excuse holds up. Verdict: guilty? You're doing a punishment task — and you can't mark it done for at least an hour. No cheating. No shortcuts. No mercy.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+> *"I'll start tomorrow"* — You, never again.
 
-## React Compiler
+---
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## How It Works
 
-## Expanding the ESLint configuration
+1. **Set your goals** — Define what you're working toward with deadlines and daily check-in requirements
+2. **Add accountability partners** — Invite people who'll actually hold you to it (via email)
+3. **Check in daily** — Prove you showed up. Your streak is on the line
+4. **Miss a day?** — Write an excuse (80+ chars minimum). Your partners get a voting link
+5. **The verdict** — Partners vote accept or reject. Majority rules
+6. **Punishment** — If rejected, partners suggest and vote on a punishment. You must complete it before moving on
+7. **Encouragement** — Partners can send you cheers when you're on a roll
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+```
+ ┌─────────┐    miss    ┌──────────┐   reject   ┌────────────┐
+ │ Daily   │ ────────▶  │ Partners │ ─────────▶ │ Punishment │
+ │ Check-in│            │ Vote     │            │ Task       │
+ └─────────┘            └──────────┘            └────────────┘
+      │                      │                       │
+   streak++              accept ──▶ forgiven    complete + ack
+```
+
+## Features
+
+- **Streak tracking** with fire animations and personal stats
+- **Goal management** with deadlines, extensions, and deactivation guards
+- **Partner voting system** — democratic accountability via emailed vote links
+- **Punishment tasks** — immutable, time-gated, no shortcuts
+- **Rest days** — up to 2 per week, server-side enforced
+- **Dark & light themes** with smooth transitions
+- **Stats dashboard** and **feedback system**
+- **Mobile-friendly**
+
+## Tech Stack
+
+React 19 · Vite 7 · Supabase (Postgres, Auth, Edge Functions, RLS) · EmailJS · Vercel
+
+Zero dependencies beyond React and Supabase client. No CSS framework. No state library. Just vibes and discipline.
+
+---
+
+Built with spite, structure, and Supabase.
