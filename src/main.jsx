@@ -57,6 +57,44 @@ function getPasswordStrength(pw) {
   return { score, label: 'Strong', cls: 'pw-strong' }
 }
 
+function EyeIcon({ visible }) {
+  if (visible) {
+    return (
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+        <circle cx="12" cy="12" r="3"/>
+      </svg>
+    )
+  }
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/>
+      <line x1="1" y1="1" x2="23" y2="23"/>
+    </svg>
+  )
+}
+
+function PasswordInput({ value, onChange, placeholder, autoComplete, minLength, required = true }) {
+  const [showPw, setShowPw] = useState(false)
+  return (
+    <div className="pw-input-wrap">
+      <input
+        type={showPw ? 'text' : 'password'}
+        className="field-input pw-field"
+        placeholder={placeholder}
+        value={value}
+        onChange={onChange}
+        required={required}
+        minLength={minLength}
+        autoComplete={autoComplete}
+      />
+      <button type="button" className="pw-eye-btn" onClick={() => setShowPw(v => !v)} tabIndex={-1} aria-label={showPw ? 'Hide password' : 'Show password'}>
+        <EyeIcon visible={showPw} />
+      </button>
+    </div>
+  )
+}
+
 function LoginPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -110,16 +148,20 @@ function LoginPage() {
     }
 
     if (mode === 'signup') {
+      // Supabase signUp: if the user already exists and is confirmed,
+      // it returns a user with a fake ID and no identities array.
+      // We detect this to show a helpful message.
       const { data, error: authError } = await supabase.auth.signUp({ email, password })
       if (authError) {
-        // Handle expired/existing unconfirmed accounts
         if (authError.message?.includes('already registered') || authError.message?.includes('already been registered')) {
           setError('This email is already registered. Try signing in, or check your inbox for a confirmation link.')
         } else {
           setError(authError.message)
         }
+      } else if (data?.user && (!data.user.identities || data.user.identities.length === 0)) {
+        // User already exists (confirmed account) — identities is empty
+        setError('An account with this email already exists. Try signing in instead.')
       } else if (data?.user && !data.session) {
-        // Email confirmation required
         showToast('Confirmation email sent! Check your inbox.', 'success')
         setPassword('')
         setConfirmPassword('')
@@ -129,7 +171,6 @@ function LoginPage() {
       if (authError) {
         if (authError.message?.includes('Email not confirmed')) {
           setError('Email not confirmed yet. Check your inbox or sign up again if the link expired.')
-          // Offer resend
         } else if (authError.message?.includes('Invalid login credentials')) {
           setError('Invalid email or password')
         } else {
@@ -155,6 +196,24 @@ function LoginPage() {
     } else {
       showToast('Confirmation email resent! Check your inbox.', 'success')
       setError('')
+    }
+    setLoading(false)
+  }
+
+  async function handleForgotPassword() {
+    if (!email || !email.includes('@')) {
+      setError('Enter your email above first')
+      return
+    }
+    setLoading(true); setError('')
+    const { error: resetErr } = await supabase.auth.resetPasswordForEmail(
+      email.trim().toLowerCase(),
+      { redirectTo: `${window.location.origin}` }
+    )
+    if (resetErr) {
+      setError(resetErr.message)
+    } else {
+      showToast('Password reset email sent! Check your inbox.', 'success')
     }
     setLoading(false)
   }
@@ -187,9 +246,12 @@ function LoginPage() {
         <form onSubmit={handleSubmit} className="login-form">
           <input type="email" className="field-input" placeholder="Email"
             value={email} onChange={e => setEmail(e.target.value)} required autoComplete="email" />
-          <input type="password" className="field-input" placeholder={mode === 'signup' ? 'Password (min 8 chars)' : 'Password'}
-            value={password} onChange={e => setPassword(e.target.value)} required minLength={mode === 'signup' ? 8 : 6}
-            autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} />
+          <PasswordInput
+            value={password} onChange={e => setPassword(e.target.value)}
+            placeholder={mode === 'signup' ? 'Password (min 8 chars)' : 'Password'}
+            minLength={mode === 'signup' ? 8 : 6}
+            autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
+          />
 
           {mode === 'signup' && password && (
             <div className="pw-strength">
@@ -201,9 +263,11 @@ function LoginPage() {
           )}
 
           {mode === 'signup' && (
-            <input type="password" className="field-input" placeholder="Confirm password"
-              value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} required minLength={8}
-              autoComplete="new-password" />
+            <PasswordInput
+              value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)}
+              placeholder="Confirm password" minLength={8}
+              autoComplete="new-password"
+            />
           )}
 
           {error && <p className="missed-error">{error}</p>}
@@ -218,10 +282,17 @@ function LoginPage() {
         </form>
 
         {mode === 'login' && (
-          <p className="auth-hint">
-            Don't have an account?{' '}
-            <button className="auth-hint-link" onClick={switchMode}>Sign up</button>
-          </p>
+          <>
+            <p className="auth-hint auth-forgot">
+              <button className="auth-hint-link" onClick={handleForgotPassword} disabled={loading}>
+                Forgot password?
+              </button>
+            </p>
+            <p className="auth-hint">
+              Don't have an account?{' '}
+              <button className="auth-hint-link" onClick={switchMode}>Sign up</button>
+            </p>
+          </>
         )}
         {mode === 'signup' && (
           <p className="auth-hint">
@@ -271,12 +342,80 @@ async function checkNotificationReminder(userId) {
   })
 }
 
+function ResetPasswordPage() {
+  const [newPw, setNewPw] = useState('')
+  const [confirmPw, setConfirmPw] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [done, setDone] = useState(false)
+
+  const strength = getPasswordStrength(newPw)
+
+  async function handleReset(e) {
+    e.preventDefault()
+    setError('')
+    if (newPw.length < 8) { setError('Password must be at least 8 characters'); return }
+    if (strength.score <= 1) { setError('Password is too weak. Add uppercase, numbers, or symbols.'); return }
+    if (newPw !== confirmPw) { setError('Passwords don\'t match'); return }
+    setLoading(true)
+    const { error: updateErr } = await supabase.auth.updateUser({ password: newPw })
+    if (updateErr) {
+      setError(updateErr.message)
+    } else {
+      setDone(true)
+    }
+    setLoading(false)
+  }
+
+  if (done) {
+    return (
+      <div className="app">
+        <header><h1>Accountabuddy</h1></header>
+        <section className="card">
+          <p className="vote-status" style={{ color: '#4ade80' }}>Password updated successfully!</p>
+          <button className="save-btn" onClick={() => window.location.replace('/')}>Continue to app</button>
+        </section>
+      </div>
+    )
+  }
+
+  return (
+    <div className="app">
+      <header>
+        <h1>Accountabuddy</h1>
+        <p className="date">Set your new password</p>
+      </header>
+      <section className="card auth-card auth-slide-in">
+        <form onSubmit={handleReset} className="login-form">
+          <PasswordInput value={newPw} onChange={e => setNewPw(e.target.value)}
+            placeholder="New password (min 8 chars)" autoComplete="new-password" minLength={8} />
+          {newPw && (
+            <div className="pw-strength">
+              <div className="pw-strength-bar">
+                <div className={`pw-strength-fill ${strength.cls}`} style={{ width: `${Math.min(strength.score, 4) * 25}%` }} />
+              </div>
+              <span className={`pw-strength-label ${strength.cls}`}>{strength.label}</span>
+            </div>
+          )}
+          <PasswordInput value={confirmPw} onChange={e => setConfirmPw(e.target.value)}
+            placeholder="Confirm new password" autoComplete="new-password" minLength={8} />
+          {error && <p className="missed-error">{error}</p>}
+          <button className="save-btn" disabled={loading}>
+            {loading ? 'Updating...' : 'Update Password'}
+          </button>
+        </form>
+      </section>
+    </div>
+  )
+}
+
 function Main() {
   const [tab, setTab] = useState('checkin')
   const [session, setSession] = useState(undefined)
   const [setupDone, setSetupDone] = useState(undefined)
   const [visitedTabs, setVisitedTabs] = useState({ checkin: true, stats: false, settings: false })
   const [theme, setTheme] = useState(getPreferredTheme)
+  const [recoveryMode, setRecoveryMode] = useState(false)
 
   async function checkSetup(userId) {
     const [goalsRes, partnersRes] = await Promise.all([
@@ -295,7 +434,10 @@ function Main() {
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session: s } }) => setSession(s))
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, s) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, s) => {
+      if (event === 'PASSWORD_RECOVERY') {
+        setRecoveryMode(true)
+      }
       setSession(s)
       if (!s) setSetupDone(undefined)
     })
@@ -334,6 +476,8 @@ function Main() {
   }
 
   if (!session) return <LoginPage />
+
+  if (recoveryMode) return <ResetPasswordPage />
 
   const userId = session.user.id
 

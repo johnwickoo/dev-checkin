@@ -1116,6 +1116,60 @@ header h1::before {
   text-align: right;
 }
 
+/* Password eye toggle */
+.pw-input-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.pw-input-wrap .pw-field {
+  flex: 1;
+  padding-right: 2.5rem;
+}
+
+.pw-eye-btn {
+  position: absolute;
+  right: 0.5rem;
+  background: none;
+  border: none;
+  color: #555;
+  cursor: pointer;
+  padding: 0.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.15s ease;
+}
+
+.pw-eye-btn:hover { color: #888; }
+
+/* Change password section */
+.change-pw-section {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid #1a1a1a;
+}
+
+.change-pw-title {
+  font-size: 0.85rem;
+  color: #888;
+  margin-bottom: 0.75rem;
+  font-weight: 600;
+}
+
+.change-pw-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.pw-success {
+  color: #4ade80;
+  font-size: 0.78rem;
+  margin: 0.25rem 0;
+}
+
 /* Auth hint link */
 .auth-hint {
   margin-top: 0.75rem;
@@ -2637,6 +2691,26 @@ header h1::before {
 
 :root[data-theme='light'] .auth-hint-link:hover {
   color: #14532d;
+}
+
+:root[data-theme='light'] .pw-eye-btn {
+  color: #94a3b8;
+}
+
+:root[data-theme='light'] .pw-eye-btn:hover {
+  color: #475569;
+}
+
+:root[data-theme='light'] .change-pw-section {
+  border-top-color: #e2e8f0;
+}
+
+:root[data-theme='light'] .change-pw-title {
+  color: #64748b;
+}
+
+:root[data-theme='light'] .pw-success {
+  color: #16a34a;
 }
 
 /* ── Light theme: interactive elements ─────────────────────── */

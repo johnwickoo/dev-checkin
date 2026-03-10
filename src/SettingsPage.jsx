@@ -3,6 +3,54 @@ import { supabase } from './supabase.js'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
+function PasswordInput({ value, onChange, placeholder, autoComplete, minLength, required = true }) {
+  const [showPw, setShowPw] = useState(false)
+  return (
+    <div className="pw-input-wrap">
+      <input
+        type={showPw ? 'text' : 'password'}
+        className="field-input pw-field"
+        placeholder={placeholder}
+        value={value}
+        onChange={onChange}
+        required={required}
+        minLength={minLength}
+        autoComplete={autoComplete}
+      />
+      <button type="button" className="pw-eye-btn" onClick={() => setShowPw(v => !v)} tabIndex={-1}
+        aria-label={showPw ? 'Hide password' : 'Show password'}>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          {showPw ? (
+            <>
+              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+              <circle cx="12" cy="12" r="3"/>
+            </>
+          ) : (
+            <>
+              <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/>
+              <line x1="1" y1="1" x2="23" y2="23"/>
+            </>
+          )}
+        </svg>
+      </button>
+    </div>
+  )
+}
+
+function getPasswordStrength(pw) {
+  if (!pw) return { score: 0, label: '', cls: '' }
+  let score = 0
+  if (pw.length >= 6) score++
+  if (pw.length >= 10) score++
+  if (/[A-Z]/.test(pw) && /[a-z]/.test(pw)) score++
+  if (/\d/.test(pw)) score++
+  if (/[^A-Za-z0-9]/.test(pw)) score++
+  if (score <= 1) return { score, label: 'Weak', cls: 'pw-weak' }
+  if (score <= 2) return { score, label: 'Fair', cls: 'pw-fair' }
+  if (score <= 3) return { score, label: 'Good', cls: 'pw-good' }
+  return { score, label: 'Strong', cls: 'pw-strong' }
+}
+
 function SettingsPage({ userId, onSetupComplete, onSkip, onLogout, theme = 'dark', onToggleTheme }) {
   const [goals, setGoals] = useState([])
   const [completedGoals, setCompletedGoals] = useState([])
@@ -13,6 +61,12 @@ function SettingsPage({ userId, onSetupComplete, onSkip, onLogout, theme = 'dark
   const [newDeadline, setNewDeadline] = useState('')
   const [newPartner, setNewPartner] = useState('')
   const [loading, setLoading] = useState(true)
+  const [pwCurrent, setPwCurrent] = useState('')
+  const [pwNew, setPwNew] = useState('')
+  const [pwConfirm, setPwConfirm] = useState('')
+  const [pwLoading, setPwLoading] = useState(false)
+  const [pwError, setPwError] = useState('')
+  const [pwSuccess, setPwSuccess] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [showRestDays, setShowRestDays] = useState(false)
@@ -501,6 +555,63 @@ function SettingsPage({ userId, onSetupComplete, onSkip, onLogout, theme = 'dark
               </button>
             </div>
           )}
+
+          <div className="change-pw-section">
+            <h3 className="change-pw-title">Change Password</h3>
+            <form onSubmit={async (e) => {
+              e.preventDefault()
+              setPwError(''); setPwSuccess('')
+              if (pwNew.length < 8) { setPwError('New password must be at least 8 characters'); return }
+              const strength = getPasswordStrength(pwNew)
+              if (strength.score <= 1) { setPwError('New password is too weak. Add uppercase, numbers, or symbols.'); return }
+              if (pwNew !== pwConfirm) { setPwError('New passwords don\'t match'); return }
+              if (pwNew === pwCurrent) { setPwError('New password must be different from current'); return }
+              setPwLoading(true)
+              // Verify current password by re-signing in
+              const { data: { user } } = await supabase.auth.getUser()
+              const { error: signInErr } = await supabase.auth.signInWithPassword({
+                email: user.email,
+                password: pwCurrent,
+              })
+              if (signInErr) {
+                setPwError('Current password is incorrect')
+                setPwLoading(false)
+                return
+              }
+              const { error: updateErr } = await supabase.auth.updateUser({ password: pwNew })
+              if (updateErr) {
+                setPwError(updateErr.message)
+              } else {
+                setPwSuccess('Password changed successfully')
+                setPwCurrent(''); setPwNew(''); setPwConfirm('')
+              }
+              setPwLoading(false)
+            }} className="change-pw-form">
+              <PasswordInput value={pwCurrent} onChange={e => setPwCurrent(e.target.value)}
+                placeholder="Current password" autoComplete="current-password" minLength={6} />
+              <PasswordInput value={pwNew} onChange={e => setPwNew(e.target.value)}
+                placeholder="New password (min 8 chars)" autoComplete="new-password" minLength={8} />
+              {pwNew && (
+                <div className="pw-strength">
+                  <div className="pw-strength-bar">
+                    <div className={`pw-strength-fill ${getPasswordStrength(pwNew).cls}`}
+                      style={{ width: `${Math.min(getPasswordStrength(pwNew).score, 4) * 25}%` }} />
+                  </div>
+                  <span className={`pw-strength-label ${getPasswordStrength(pwNew).cls}`}>
+                    {getPasswordStrength(pwNew).label}
+                  </span>
+                </div>
+              )}
+              <PasswordInput value={pwConfirm} onChange={e => setPwConfirm(e.target.value)}
+                placeholder="Confirm new password" autoComplete="new-password" minLength={8} />
+              {pwError && <p className="missed-error">{pwError}</p>}
+              {pwSuccess && <p className="pw-success">{pwSuccess}</p>}
+              <button className="save-btn" disabled={pwLoading || !pwCurrent || !pwNew || !pwConfirm}>
+                {pwLoading ? 'Changing...' : 'Change Password'}
+              </button>
+            </form>
+          </div>
+
           {onLogout && (
             <button className="history-toggle settings-logout-btn" onClick={onLogout}>
               Log out
