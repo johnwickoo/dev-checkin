@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { supabase } from './supabase.js'
 import {
   STREAK_MIN_COMPLETION_RATIO,
@@ -191,6 +191,53 @@ function evaluateGoalVerification({ userId, goalId, date, completed, proofUrl, p
   }
 }
 
+function buildEditableSnapshot({ mood, learned, built, builtLink, goalProgress, goals }) {
+  const goalSnapshot = {}
+  for (const goal of (goals || [])) {
+    const goalId = String(goal?.id || '')
+    if (!goalId) continue
+    const gp = goalProgress?.[goalId] || {}
+    goalSnapshot[goalId] = {
+      completed: !!gp.completed,
+      proofUrl: String(gp.proofUrl || '').trim(),
+      proofImagePath: String(gp.proofImagePath || ''),
+    }
+  }
+
+  return {
+    mood: Number(mood) || 0,
+    learned: String(learned || '').trim(),
+    built: String(built || '').trim(),
+    builtLink: String(builtLink || '').trim(),
+    goals: goalSnapshot,
+  }
+}
+
+function areEditableSnapshotsEqual(a, b) {
+  if (!a || !b) return false
+  if (a.mood !== b.mood) return false
+  if (a.learned !== b.learned) return false
+  if (a.built !== b.built) return false
+  if (a.builtLink !== b.builtLink) return false
+
+  const aGoals = a.goals || {}
+  const bGoals = b.goals || {}
+  const aKeys = Object.keys(aGoals)
+  const bKeys = Object.keys(bGoals)
+  if (aKeys.length !== bKeys.length) return false
+
+  for (const key of aKeys) {
+    const aGoal = aGoals[key]
+    const bGoal = bGoals[key]
+    if (!bGoal) return false
+    if (!!aGoal.completed !== !!bGoal.completed) return false
+    if (aGoal.proofUrl !== bGoal.proofUrl) return false
+    if (aGoal.proofImagePath !== bGoal.proofImagePath) return false
+  }
+
+  return true
+}
+
 // ── Offline queue ──────────────────────────────────────────
 function queueOffline(action) {
   const q = JSON.parse(localStorage.getItem('offline_queue') || '[]')
@@ -293,6 +340,8 @@ function App({ userId }) {
 
   // UI
   const [saveStatus, setSaveStatus] = useState('idle') // idle | saving | saved | error
+  const [autoSaveEnabled, setAutoSaveEnabled] = useState(() => localStorage.getItem('accountabuddy_autosave') === 'true')
+  const [lastSavedSnapshot, setLastSavedSnapshot] = useState(null)
   const [loading, setLoading] = useState(true)
   const [toast, setToast] = useState(null)
   const [showHistory, setShowHistory] = useState(false)
@@ -390,6 +439,27 @@ function App({ userId }) {
     return () => { window.removeEventListener('online', onOnline); window.removeEventListener('offline', onOffline) }
   }, [])
 
+  useEffect(() => {
+    function syncAutoSaveSetting() {
+      setAutoSaveEnabled(localStorage.getItem('accountabuddy_autosave') === 'true')
+    }
+
+    function onAutoSaveChanged(event) {
+      if (typeof event?.detail?.enabled === 'boolean') {
+        setAutoSaveEnabled(event.detail.enabled)
+        return
+      }
+      syncAutoSaveSetting()
+    }
+
+    window.addEventListener('focus', syncAutoSaveSetting)
+    window.addEventListener('accountabuddy:autosave-changed', onAutoSaveChanged)
+    return () => {
+      window.removeEventListener('focus', syncAutoSaveSetting)
+      window.removeEventListener('accountabuddy:autosave-changed', onAutoSaveChanged)
+    }
+  }, [])
+
   // ── Load everything ───────────────────────────────────────
   useEffect(() => { loadAll() }, [])
 
@@ -471,6 +541,14 @@ function App({ userId }) {
         challengeWindowEndsAt: row.challenge_window_ends_at || null,
       }
       setGoalProgress(progress)
+      setLastSavedSnapshot(buildEditableSnapshot({
+        mood: c.mood || 0,
+        learned: c.learned || '',
+        built: c.built || '',
+        builtLink: c.built_link || '',
+        goalProgress: progress,
+        goals: userGoals,
+      }))
     } else {
       const progress = {}
       for (const g of userGoals) {
@@ -486,7 +564,21 @@ function App({ userId }) {
           challengeWindowEndsAt: null,
         }
       }
+      setCheckin(null)
+      setMoodVal(0)
+      setLearned('')
+      setBuilt('')
+      setBuiltLink('')
+      setSaveStatus('idle')
       setGoalProgress(progress)
+      setLastSavedSnapshot(buildEditableSnapshot({
+        mood: 0,
+        learned: '',
+        built: '',
+        builtLink: '',
+        goalProgress: progress,
+        goals: userGoals,
+      }))
     }
 
     // Check rest days (server-side)
@@ -924,6 +1016,14 @@ function App({ userId }) {
 
     if (!navigator.onLine) {
       queueOffline({ table: 'checkins', method: 'upsert', data: checkinData, opts: { onConflict: 'user_id,date' } })
+      setLastSavedSnapshot(buildEditableSnapshot({
+        mood: checkinData.mood,
+        learned: checkinData.learned,
+        built: checkinData.built,
+        builtLink: checkinData.built_link || '',
+        goalProgress,
+        goals,
+      }))
       setSaveStatus('saved')
       showToast('Saved offline — will sync when back online')
       return
@@ -1021,6 +1121,14 @@ function App({ userId }) {
       }
 
       if (version === saveVersion.current) {
+        setLastSavedSnapshot(buildEditableSnapshot({
+          mood: checkinData.mood,
+          learned: checkinData.learned,
+          built: checkinData.built,
+          builtLink: checkinData.built_link || '',
+          goalProgress: nextGoalProgress,
+          goals,
+        }))
         setSaveStatus('saved')
         loadStreakAndDots()
       }
@@ -1036,10 +1144,11 @@ function App({ userId }) {
       }
       console.error('Check-in save error:', err)
     }
-  }, [userId, today, mood, learned, built, builtLink, goalProgress, checkin])
+  }, [userId, today, mood, learned, built, builtLink, goalProgress, checkin, goals])
 
-  // Trigger auto-save on field changes (debounced 2s)
+  // Derived state
   const completedGoalEntries = Object.values(goalProgress).filter(gp => gp.completed)
+  const hasSelectedGoal = completedGoalEntries.length > 0
   const completedGoalsWithProof = completedGoalEntries.filter(gp => hasGoalProof(gp)).length
   const hasCompletedWithoutProof = completedGoalEntries.some(gp => !hasGoalProof(gp))
   const verifiedTodayGoals = completedGoalEntries.filter(gp => getVerificationStatus(gp) === 'verified').length
@@ -1051,22 +1160,42 @@ function App({ userId }) {
   const noActiveGoals = goals.length === 0
   const isComplete = !noActiveGoals
     && learned.trim().length >= 50
-    && built.trim().length > 0
     && completedGoalsWithProof > 0
     && !hasCompletedWithoutProof
-  const doneForToday = !noActiveGoals && saveStatus === 'saved' && isComplete && failedTodayGoals === 0
+  const currentInputSnapshot = useMemo(() => buildEditableSnapshot({
+    mood,
+    learned,
+    built,
+    builtLink,
+    goalProgress,
+    goals,
+  }), [mood, learned, built, builtLink, goalProgress, goals])
+  const hasUnsavedChanges = useMemo(
+    () => !areEditableSnapshotsEqual(currentInputSnapshot, lastSavedSnapshot),
+    [currentInputSnapshot, lastSavedSnapshot],
+  )
+  const doneForToday = !noActiveGoals
+    && saveStatus === 'saved'
+    && isComplete
+    && failedTodayGoals === 0
+    && !hasUnsavedChanges
 
   useEffect(() => {
     if (!doneForToday || postSubmitUiApplied) return
     setCollapsed(prev => ({ ...prev, goals: true, mood: true, learned: true, built: true }))
     setPostSubmitUiApplied(true)
-    // Celebration confetti
     import('canvas-confetti').then(({ default: confetti }) => {
       confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } })
     }).catch(() => {})
   }, [doneForToday, postSubmitUiApplied])
 
+  // Auto-save (only if enabled in settings)
   useEffect(() => {
+    if (!autoSaveEnabled) {
+      clearTimeout(autoSaveTimer.current)
+      return
+    }
+    if (!hasUnsavedChanges) return
     if (loading) return
     if (noActiveGoals) { setSaveStatus('idle'); return }
     if (!isComplete) { setSaveStatus('idle'); return }
@@ -1074,7 +1203,7 @@ function App({ userId }) {
     clearTimeout(autoSaveTimer.current)
     autoSaveTimer.current = setTimeout(doSave, 2000)
     return () => clearTimeout(autoSaveTimer.current)
-  }, [mood, learned, built, builtLink, goalProgress, isComplete, loading, doSave, noActiveGoals])
+  }, [mood, learned, built, builtLink, goalProgress, isComplete, loading, doSave, noActiveGoals, autoSaveEnabled, hasUnsavedChanges])
 
   // ── Punishment ────────────────────────────────────────────
   async function acknowledgePunishment() {
@@ -1425,6 +1554,10 @@ function App({ userId }) {
 
   // ── Force save (manual trigger) ───────────────────────────
   function handleForceSave() {
+    if (!hasUnsavedChanges) {
+      showToast('No changes to save', 'error')
+      return
+    }
     clearTimeout(autoSaveTimer.current)
     doSave()
   }
@@ -1476,12 +1609,17 @@ function App({ userId }) {
   const dateDisplay = formatDate(today)
   const tomorrowDisplay = formatShortDate(dateOffset(today, 1))
 
-  // ── Auto-save status label ────────────────────────────────
+  // ── Save status label ────────────────────────────────
   const saveLabel = noActiveGoals ? 'No active goals — add a new goal in Settings'
     : saveStatus === 'saving' ? 'Saving...'
-    : saveStatus === 'saved' ? (doneForToday ? 'All set for today' : hasFailedVerificationToday ? 'Saved - fix failed proof' : 'Saved')
     : saveStatus === 'error' ? 'Save failed'
-    : isComplete ? 'Will auto-save' : 'Complete all fields to save'
+    : !autoSaveEnabled && hasUnsavedChanges ? 'Unsaved changes'
+    : saveStatus === 'saved' ? (doneForToday ? 'All set for today' : hasFailedVerificationToday ? 'Saved - fix failed proof' : 'Saved')
+    : isComplete && autoSaveEnabled ? 'Will auto-save'
+    : ''
+  const saveIndicatorState = !autoSaveEnabled && hasUnsavedChanges && saveStatus !== 'saving'
+    ? 'idle'
+    : saveStatus
 
   // ── Loading ───────────────────────────────────────────────
   if (loading) {
@@ -1662,9 +1800,11 @@ function App({ userId }) {
         )}
       </header>
 
-      {/* Auto-save indicator — only show when actively saving or just saved */}
-      {saveStatus !== 'idle' && (
-        <div className={`autosave-indicator autosave-${saveStatus}`}>{saveLabel}</div>
+      {/* Save status indicator */}
+      {saveLabel && (
+        <div className={`autosave-indicator autosave-${saveIndicatorState}`}>
+          {saveLabel}
+        </div>
       )}
 
       {doneForToday && (
@@ -1742,7 +1882,11 @@ function App({ userId }) {
           <input ref={fileInputRef} type="file" accept="image/*" onChange={handleGoalImageUpload} style={{ display: 'none' }} />
           {goals.length === 0 ? (
             <p className="empty-state">No goals yet. Add some in Settings to start tracking.</p>
-          ) : (
+          ) : (<>
+            <p className="goal-step-hint">Step 1: tick at least one goal below. Step 2: add proof (URL or image).</p>
+            {!hasSelectedGoal && (
+              <p className="goal-hint">No goal selected yet. Use the checkbox next to a goal to include it in today&apos;s check-in.</p>
+            )}
             <div className="blocks">
               {goals.map(goal => {
                 const gp = goalProgress[goal.id] || {
@@ -1845,7 +1989,7 @@ function App({ userId }) {
                 )
               })}
             </div>
-          )}
+          </>)}
         </>)}
       </section>
 
@@ -1885,10 +2029,10 @@ function App({ userId }) {
 
       <section className="card">
         <h2 className="card-header" onClick={() => toggleCollapse('built')}>
-          What I Built {collapsed.built ? '+' : ''}
+          What I Built <span className="optional-tag">optional</span> {collapsed.built ? '+' : ''}
         </h2>
         {!collapsed.built && (<>
-          <textarea className="field-textarea" placeholder="Describe what you built or wrote today..."
+          <textarea className="field-textarea" placeholder="Built something today? Share it here..."
             value={built} onChange={e => setBuilt(e.target.value)} rows={3} />
           <input type="url" className="field-input" placeholder="Link (optional)"
             value={builtLink} onChange={e => setBuiltLink(e.target.value)} />
@@ -1990,9 +2134,21 @@ function App({ userId }) {
         </>)}
       </section>
 
-      {/* Manual save — only when autosave hasn't kicked in */}
-      {isComplete && saveStatus !== 'saved' && saveStatus !== 'saving' && (
-        <button className="save-btn save-fallback" onClick={handleForceSave}>Save Now</button>
+      {/* Manual save */}
+      {((!autoSaveEnabled && hasUnsavedChanges) || (autoSaveEnabled && isComplete && saveStatus !== 'saved')) && (
+        <button className="save-btn" onClick={handleForceSave} disabled={saveStatus === 'saving'}>
+          {saveStatus === 'saving' ? 'Saving...' : autoSaveEnabled ? 'Save Check-in' : 'Save Changes'}
+        </button>
+      )}
+      {autoSaveEnabled && !isComplete && !noActiveGoals && !doneForToday && (
+        <button className="save-btn" disabled style={{ opacity: 0.4 }}>
+          {learned.trim().length < 50
+            ? `Need ${50 - learned.trim().length} more chars in Today's W`
+            : !hasSelectedGoal ? 'Select at least 1 goal above'
+            : hasCompletedWithoutProof ? 'Add proof URL or image for selected goals'
+            : completedGoalsWithProof === 0 ? 'Add proof for at least 1 selected goal'
+            : 'Complete all fields to save'}
+        </button>
       )}
 
       {toast && <div className={`toast toast-${toast.type}`}>{toast.message}</div>}

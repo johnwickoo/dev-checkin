@@ -71,6 +71,7 @@ function SettingsPage({ userId, onSetupComplete, onSkip, onLogout, theme = 'dark
   const [error, setError] = useState('')
   const [showRestDays, setShowRestDays] = useState(false)
   const [showNotifications, setShowNotifications] = useState(false)
+  const [autoSaveEnabled, setAutoSaveEnabled] = useState(() => localStorage.getItem('accountabuddy_autosave') === 'true')
 
   // Rest days
   const [restDays, setRestDays] = useState([])
@@ -108,6 +109,7 @@ function SettingsPage({ userId, onSetupComplete, onSkip, onLogout, theme = 'dark
       const hour = parseInt(localStorage.getItem(`reminder_hour_${userId}`) || '21', 10)
       setReminderHour(hour)
     }
+    setAutoSaveEnabled(localStorage.getItem('accountabuddy_autosave') === 'true')
 
     setLoading(false)
   }
@@ -238,6 +240,13 @@ function SettingsPage({ userId, onSetupComplete, onSkip, onLogout, theme = 'dark
     const h = Math.max(0, Math.min(23, parseInt(val, 10) || 0))
     setReminderHour(h)
     saveSettings({ reminder_hour: h })
+  }
+
+  function toggleAutoSave() {
+    const next = !autoSaveEnabled
+    setAutoSaveEnabled(next)
+    localStorage.setItem('accountabuddy_autosave', next ? 'true' : 'false')
+    window.dispatchEvent(new CustomEvent('accountabuddy:autosave-changed', { detail: { enabled: next } }))
   }
 
   async function requestNotifPermission() {
@@ -482,6 +491,28 @@ function SettingsPage({ userId, onSetupComplete, onSkip, onLogout, theme = 'dark
             )}
           </>
         )}
+      </section>
+
+      <section className="card">
+        <h2>Check-in Saving</h2>
+        <p className="subtitle">Manual save is default. Enable autosave if you want check-ins saved automatically once complete.</p>
+        <div className="settings-theme-row">
+          <button
+            className="theme-toggle"
+            onClick={toggleAutoSave}
+            aria-label={`Turn ${autoSaveEnabled ? 'off' : 'on'} autosave`}
+          >
+            <span className={`theme-toggle-switch ${autoSaveEnabled ? 'theme-toggle-switch-on' : ''}`}>
+              <span className="theme-toggle-thumb" />
+            </span>
+            <span className="theme-toggle-label">{autoSaveEnabled ? 'Auto-save on' : 'Auto-save off'}</span>
+          </button>
+        </div>
+        <p className="settings-item-sub settings-toggle-sub">
+          {autoSaveEnabled
+            ? 'App will save automatically when required fields are complete.'
+            : 'You must tap "Save Check-in" each day.'}
+        </p>
       </section>
 
       <section className="card card-accent-green">

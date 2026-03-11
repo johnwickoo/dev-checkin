@@ -26,7 +26,7 @@
 header {
   text-align: left;
   padding-bottom: 0.75rem;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.10);
 }
 
 header h1 {
@@ -43,7 +43,7 @@ header h1::before {
 .date {
   margin-top: 0.3rem;
   font-size: 0.82rem;
-  color: #64647a;
+  color: #9090a8;
   font-weight: 500;
 }
 
@@ -66,12 +66,12 @@ header h1::before {
 .streak-quality {
   margin-top: 0.2rem;
   font-size: 0.72rem;
-  color: #888;
+  color: #a0a0b4;
 }
 
 .streak-quality-sub {
   margin-top: 0.15rem;
-  color: #666;
+  color: #9a9ab0;
 }
 
 .header-detail-toggle {
@@ -79,7 +79,7 @@ header h1::before {
   padding: 0;
   border: 0;
   background: transparent;
-  color: #666;
+  color: #9a9ab0;
   font-size: 0.72rem;
   font-family: inherit;
   cursor: pointer;
@@ -88,7 +88,7 @@ header h1::before {
 }
 
 .header-detail-toggle:hover {
-  color: #888;
+  color: #a8a8bc;
 }
 
 .streak-verified {
@@ -105,17 +105,17 @@ header h1::before {
 
 /* Cards */
 .card {
-  background: rgba(255, 255, 255, 0.035);
+  background: rgba(255, 255, 255, 0.055);
   border-radius: 14px;
   padding: 1.1rem 1.2rem;
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.10);
   transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .card h2 {
   font-size: 0.78rem;
   font-weight: 700;
-  color: #8888a0;
+  color: #a0a0b8;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   margin-bottom: 0.35rem;
@@ -123,7 +123,7 @@ header h1::before {
 
 .subtitle {
   font-size: 0.8rem;
-  color: #444;
+  color: #9090a0;
   margin-bottom: 0.75rem;
 }
 
@@ -193,7 +193,7 @@ header h1::before {
 .block-name {
   font-size: 0.85rem;
   font-weight: 400;
-  color: #666;
+  color: #9a9ab0;
 }
 
 .block.done .block-name {
@@ -215,7 +215,7 @@ header h1::before {
   border-radius: 3px;
   border: 1px solid #222;
   background: #0a0a0a;
-  color: #888;
+  color: #a8a8bc;
   font-size: 1.125rem;
   font-family: inherit;
   cursor: pointer;
@@ -263,7 +263,7 @@ header h1::before {
 
 .mood-current::before {
   content: '= ';
-  color: #333;
+  color: #8a8a9a;
 }
 
 .mood-scale {
@@ -280,7 +280,7 @@ header h1::before {
   gap: 0.25rem;
   padding: 0.55rem 0.125rem;
   border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.10);
   background: transparent;
   cursor: pointer;
   font-family: inherit;
@@ -304,7 +304,7 @@ header h1::before {
 .mood-num {
   font-size: 1rem;
   font-weight: 700;
-  color: #444;
+  color: #9090a0;
 }
 
 .mood-btn.active .mood-num {
@@ -313,7 +313,7 @@ header h1::before {
 
 .mood-label {
   font-size: 0.55rem;
-  color: #444;
+  color: #9090a0;
   text-transform: uppercase;
   letter-spacing: 0.03em;
   font-weight: 600;
@@ -337,7 +337,7 @@ header h1::before {
 
 .missed-prompt {
   font-size: 0.85rem;
-  color: #666;
+  color: #9a9ab0;
   margin-bottom: 0.75rem;
   line-height: 1.5;
 }
@@ -362,7 +362,7 @@ header h1::before {
 }
 
 .missed-textarea::placeholder {
-  color: #444;
+  color: #9090a0;
 }
 
 .char-count {
@@ -383,7 +383,7 @@ header h1::before {
 
 .deadline-extension-section .settings-item-sub {
   margin-top: 0.375rem;
-  color: #666;
+  color: #9a9ab0;
 }
 
 /* Avoidable Toggle */
@@ -393,7 +393,7 @@ header h1::before {
 
 .avoidable-label {
   font-size: 0.8rem;
-  color: #666;
+  color: #9a9ab0;
   font-weight: 600;
   margin-bottom: 0.375rem;
 }
@@ -407,9 +407,9 @@ header h1::before {
   flex: 1;
   padding: 0.55rem;
   border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.10);
   background: transparent;
-  color: #666;
+  color: #9a9ab0;
   font-family: inherit;
   font-size: 0.8rem;
   font-weight: 600;
@@ -527,7 +527,7 @@ header h1::before {
   gap: 0.75rem;
   margin-top: 0.5rem;
   font-size: 0.7rem;
-  color: #444;
+  color: #9090a0;
   font-weight: 400;
 }
 
@@ -547,8 +547,8 @@ header h1::before {
 }
 
 .history-toggle:hover {
-  border-color: #333;
-  color: #888;
+  border-color: #8a8a9a;
+  color: #a8a8bc;
 }
 
 /* History Card */
@@ -557,7 +557,7 @@ header h1::before {
 }
 
 .history-empty {
-  color: #444;
+  color: #9090a0;
   font-size: 0.8rem;
 }
 
@@ -585,7 +585,7 @@ header h1::before {
 .history-date {
   font-size: 0.75rem;
   font-weight: 600;
-  color: #888;
+  color: #a8a8bc;
 }
 
 .history-badge {
@@ -621,7 +621,7 @@ header h1::before {
   flex-direction: column;
   gap: 0.125rem;
   font-size: 0.75rem;
-  color: #444;
+  color: #9090a0;
 }
 
 /* Form Fields */
@@ -646,7 +646,7 @@ header h1::before {
 }
 
 .field-textarea::placeholder {
-  color: #444;
+  color: #9090a0;
 }
 
 .field-input {
@@ -669,7 +669,7 @@ header h1::before {
 }
 
 .field-input::placeholder {
-  color: #444;
+  color: #9090a0;
 }
 
 /* History extended fields */
@@ -704,12 +704,12 @@ header h1::before {
 
 .vote-status {
   font-size: 0.85rem;
-  color: #666;
+  color: #9a9ab0;
 }
 
 .vote-prompt {
   font-size: 0.85rem;
-  color: #888;
+  color: #a8a8bc;
   margin-bottom: 0.75rem;
 }
 
@@ -763,7 +763,7 @@ header h1::before {
 
 .vote-thanks {
   font-size: 0.9rem;
-  color: #888;
+  color: #a8a8bc;
   font-weight: 600;
 }
 
@@ -781,7 +781,7 @@ header h1::before {
 
 .vote-sub {
   font-size: 0.8rem;
-  color: #444;
+  color: #9090a0;
   margin-top: 0.375rem;
 }
 
@@ -816,12 +816,12 @@ header h1::before {
 }
 
 .verdict-sep {
-  color: #333;
+  color: #8a8a9a;
 }
 
 .punishment-excuse {
   font-size: 0.85rem;
-  color: #666;
+  color: #9a9ab0;
   font-style: italic;
   line-height: 1.5;
   padding: 0.625rem 0.75rem;
@@ -858,7 +858,7 @@ header h1::before {
 }
 
 .punishment-instruction strong {
-  color: #888;
+  color: #a8a8bc;
 }
 
 .punishment-input {
@@ -944,7 +944,11 @@ header h1::before {
 
 .settings-item-sub {
   font-size: 0.7rem;
-  color: #444;
+  color: #9090a0;
+}
+
+.settings-toggle-sub {
+  margin-top: 0.45rem;
 }
 
 .settings-item-actions {
@@ -1026,10 +1030,10 @@ header h1::before {
 .auth-mode-toggle {
   display: flex;
   gap: 4px;
-  background: rgba(255, 255, 255, 0.035);
+  background: rgba(255, 255, 255, 0.055);
   border-radius: 14px;
   padding: 4px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.10);
 }
 
 .auth-mode-btn {
@@ -1038,7 +1042,7 @@ header h1::before {
   border: none;
   border-radius: 10px;
   background: transparent;
-  color: #666;
+  color: #9a9ab0;
   font-family: inherit;
   font-size: 0.82rem;
   font-weight: 600;
@@ -1209,7 +1213,7 @@ header h1::before {
 }
 
 .landing-signin-link:hover {
-  color: #888;
+  color: #a8a8bc;
 }
 
 .landing-try-btn {
@@ -1239,7 +1243,7 @@ header h1::before {
   border-radius: 12px;
   padding: 0.6rem 0.85rem;
   font-size: 0.78rem;
-  color: #888;
+  color: #a8a8bc;
   text-align: center;
   cursor: pointer;
   transition: background 0.15s ease;
@@ -1304,7 +1308,7 @@ header h1::before {
 }
 
 .demo-prompt-dismiss:hover {
-  color: #888;
+  color: #a8a8bc;
 }
 
 /* Auth card slide animation */
@@ -1342,8 +1346,33 @@ header h1::before {
 /* Password strength meter */
 .pw-strength {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.5rem;
+}
+
+.pw-requirements {
+  width: 100%;
+  list-style: none;
+  padding: 0;
+  margin: 0.25rem 0 0 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.2rem 0.75rem;
+  font-size: 0.7rem;
+  color: #9a9ab0;
+}
+
+.pw-requirements li::before {
+  content: '○ ';
+}
+
+.pw-requirements li.pw-met {
+  color: #4ade80;
+}
+
+.pw-requirements li.pw-met::before {
+  content: '● ';
 }
 
 .pw-strength-bar {
@@ -1398,7 +1427,7 @@ header h1::before {
   transition: color 0.15s ease;
 }
 
-.pw-eye-btn:hover { color: #888; }
+.pw-eye-btn:hover { color: #a8a8bc; }
 
 /* Change password section */
 .change-pw-section {
@@ -1409,7 +1438,7 @@ header h1::before {
 
 .change-pw-title {
   font-size: 0.85rem;
-  color: #888;
+  color: #a8a8bc;
   margin-bottom: 0.75rem;
   font-weight: 600;
 }
@@ -1457,10 +1486,10 @@ header h1::before {
   flex-direction: column;
   gap: 0.35rem;
   margin-bottom: 0.6rem;
-  background: rgba(255, 255, 255, 0.035);
+  background: rgba(255, 255, 255, 0.055);
   border-radius: 14px;
   padding: 0.35rem;
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.10);
 }
 
 .tab-row {
@@ -1474,7 +1503,7 @@ header h1::before {
   border: none;
   border-radius: 10px;
   background: transparent;
-  color: #666;
+  color: #9a9ab0;
   font-family: inherit;
   font-size: 0.82rem;
   font-weight: 600;
@@ -1499,7 +1528,7 @@ header h1::before {
   border: 1px solid #1a1a1a;
   border-radius: 999px;
   background: #0a0a0a;
-  color: #888;
+  color: #a8a8bc;
   padding: 0.2rem 0.5rem 0.2rem 0.3rem;
   font-family: inherit;
   font-size: 0.7rem;
@@ -1507,7 +1536,7 @@ header h1::before {
 }
 
 .theme-toggle:hover {
-  border-color: #333;
+  border-color: #8a8a9a;
 }
 
 .theme-toggle-switch {
@@ -1632,7 +1661,7 @@ header h1::before {
 
 .stat-label {
   font-size: 0.65rem;
-  color: #444;
+  color: #9090a0;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   font-weight: 600;
@@ -1641,14 +1670,14 @@ header h1::before {
 
 .stat-sub {
   font-size: 0.75rem;
-  color: #333;
+  color: #8a8a9a;
   margin-top: 0.625rem;
   text-align: center;
 }
 
 .stats-empty {
   font-size: 0.8rem;
-  color: #333;
+  color: #8a8a9a;
   margin-top: 0.5rem;
 }
 
@@ -1705,14 +1734,14 @@ header h1::before {
 .mood-bar-val {
   font-size: 0.65rem;
   font-weight: 700;
-  color: #666;
+  color: #9a9ab0;
   margin-top: 0.25rem;
   line-height: 1;
 }
 
 .mood-bar-label {
   font-size: 0.55rem;
-  color: #333;
+  color: #8a8a9a;
   font-weight: 600;
   text-transform: uppercase;
   margin-top: 0.125rem;
@@ -1730,7 +1759,7 @@ header h1::before {
   gap: 0.5rem;
   margin-top: 0.625rem;
   font-size: 0.6rem;
-  color: #333;
+  color: #8a8a9a;
   font-weight: 500;
 }
 
@@ -1763,7 +1792,7 @@ header h1::before {
 .missed-row-date {
   font-size: 0.75rem;
   font-weight: 600;
-  color: #888;
+  color: #a8a8bc;
 }
 
 .badge-pending {
@@ -1774,14 +1803,14 @@ header h1::before {
 
 .missed-row-excuse {
   font-size: 0.75rem;
-  color: #444;
+  color: #9090a0;
   line-height: 1.4;
   font-style: italic;
 }
 
 .missed-row-votes {
   font-size: 0.65rem;
-  color: #333;
+  color: #8a8a9a;
   margin-top: 0.1875rem;
 }
 
@@ -1832,10 +1861,36 @@ header h1::before {
   padding: 0.25rem 0;
   letter-spacing: 0.03em;
   text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.inline-save-btn {
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0.2rem 0.6rem;
+  border-radius: 6px;
+  border: none;
+  background: linear-gradient(135deg, #4ade80, #22c55e);
+  color: #fff;
+  cursor: pointer;
+}
+
+.optional-tag {
+  font-size: 0.6rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #9a9ab0;
+  margin-left: 0.3rem;
 }
 
 .autosave-idle {
-  color: #333;
+  color: #8a8a9a;
 }
 
 .autosave-saving {
@@ -1869,7 +1924,7 @@ header h1::before {
 .day-done-sub {
   margin-top: 0.25rem;
   font-size: 0.74rem;
-  color: #666;
+  color: #9a9ab0;
 }
 
 .day-done-edit {
@@ -1891,7 +1946,7 @@ header h1::before {
 .verification-summary-sub {
   margin-top: 0.2rem;
   font-size: 0.72rem;
-  color: #666;
+  color: #9a9ab0;
 }
 
 .goal-cycle-card {
@@ -1907,7 +1962,7 @@ header h1::before {
 .goal-cycle-sub {
   margin-top: 0.2rem;
   font-size: 0.74rem;
-  color: #888;
+  color: #a8a8bc;
 }
 
 /* Offline Bar */
@@ -2108,7 +2163,7 @@ header h1::before {
 
 .cheer-locked-message {
   font-size: 0.85rem;
-  color: #888;
+  color: #a8a8bc;
   line-height: 1.5;
 }
 
@@ -2185,7 +2240,7 @@ header h1::before {
 }
 
 .card-header:hover {
-  color: #888;
+  color: #a8a8bc;
 }
 
 .card-header-count {
@@ -2200,6 +2255,19 @@ header h1::before {
   color: #a78bfa;
   font-weight: 600;
   margin-left: 0.25rem;
+}
+
+.goal-step-hint {
+  font-size: 0.76rem;
+  color: #9a9ab0;
+  margin: 0.35rem 0 0.4rem;
+}
+
+.goal-hint {
+  font-size: 0.74rem;
+  color: #ef4444;
+  margin-bottom: 0.45rem;
+  font-weight: 600;
 }
 
 /* Color-coded dots */
@@ -2352,7 +2420,7 @@ header h1::before {
 .vote-progress-date {
   font-size: 0.8rem;
   font-weight: 600;
-  color: #888;
+  color: #a8a8bc;
 }
 
 .vote-progress-tally {
@@ -2372,7 +2440,7 @@ header h1::before {
 }
 
 .vote-tally-sep {
-  color: #333;
+  color: #8a8a9a;
 }
 
 .vote-tally-total {
@@ -2418,13 +2486,13 @@ header h1::before {
 .chip-waiting {
   border-color: #1a1a1a;
   background: transparent;
-  color: #444;
+  color: #9090a0;
 }
 
 /* Empty state text */
 .empty-state {
   font-size: 0.8rem;
-  color: #444;
+  color: #9090a0;
   line-height: 1.5;
   margin-top: 0.375rem;
 }
@@ -2470,7 +2538,7 @@ header h1::before {
 
 .notif-label {
   font-size: 0.85rem;
-  color: #888;
+  color: #a8a8bc;
   display: flex;
   align-items: center;
   gap: 0.5rem;
@@ -2518,7 +2586,7 @@ header h1::before {
 
 .goal-stat-detail {
   font-size: 0.65rem;
-  color: #444;
+  color: #9090a0;
 }
 
 .goal-stat-bar-track {
@@ -2539,7 +2607,7 @@ header h1::before {
 .goal-stat-pct {
   font-size: 0.75rem;
   font-weight: 700;
-  color: #888;
+  color: #a8a8bc;
   width: 36px;
   text-align: right;
   flex-shrink: 0;
@@ -2716,6 +2784,7 @@ header h1::before {
 
 :root[data-theme='light'] .subtitle,
 :root[data-theme='light'] .vote-status,
+:root[data-theme='light'] .goal-step-hint,
 :root[data-theme='light'] .empty-state,
 :root[data-theme='light'] .history-details,
 :root[data-theme='light'] .settings-item-sub,
@@ -2723,6 +2792,10 @@ header h1::before {
 :root[data-theme='light'] .day-done-sub,
 :root[data-theme='light'] .goal-cycle-sub {
   color: #334155;
+}
+
+:root[data-theme='light'] .goal-hint {
+  color: #dc2626;
 }
 
 :root[data-theme='light'] .field-input,
@@ -2936,6 +3009,18 @@ header h1::before {
 
 :root[data-theme='light'] .pw-strength-bar {
   background: #e2e8f0;
+}
+
+:root[data-theme='light'] .pw-requirements {
+  color: #94a3b8;
+}
+
+:root[data-theme='light'] .pw-requirements li.pw-met {
+  color: #16a34a;
+}
+
+:root[data-theme='light'] .optional-tag {
+  color: #94a3b8;
 }
 
 :root[data-theme='light'] .auth-hint {

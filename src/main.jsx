@@ -347,6 +347,12 @@ function LoginPage({ initialMode = 'signup' }) {
                 <div className={`pw-strength-fill ${strength.cls}`} style={{ width: `${Math.min(strength.score, 4) * 25}%` }} />
               </div>
               <span className={`pw-strength-label ${strength.cls}`}>{strength.label}</span>
+              <ul className="pw-requirements">
+                <li className={password.length >= 8 ? 'pw-met' : ''}>At least 8 characters</li>
+                <li className={/[A-Z]/.test(password) && /[a-z]/.test(password) ? 'pw-met' : ''}>Upper & lowercase letters</li>
+                <li className={/\d/.test(password) ? 'pw-met' : ''}>At least 1 number</li>
+                <li className={/[^A-Za-z0-9]/.test(password) ? 'pw-met' : ''}>At least 1 special character</li>
+              </ul>
             </div>
           )}
 
