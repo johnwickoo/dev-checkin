@@ -95,14 +95,102 @@ function PasswordInput({ value, onChange, placeholder, autoComplete, minLength, 
   )
 }
 
-function LoginPage() {
+const TICKER_LINES = [
+  '"lock in bro it\'s not that hard"',
+  '"you\'re one year away from a completely different life"',
+  '"stop yapping start shipping"',
+  '"discipline is choosing between what you want now and what you want most"',
+  '"nobody\'s coming to save you"',
+  '"your future self is watching you right now through memories"',
+  '"the grind doesn\'t stop just because you\'re tired"',
+  '"accountability is the bridge between goals and accomplishment"',
+  '"you don\'t need motivation you need discipline"',
+  '"talk less build more"',
+  '"if it was easy everyone would do it"',
+  '"lock in or get left behind"',
+]
+
+function Ticker() {
+  // Double the items for seamless loop
+  const items = [...TICKER_LINES, ...TICKER_LINES]
+  return (
+    <div className="ticker-wrap">
+      <div className="ticker-track">
+        {items.map((line, i) => (
+          <span key={i} className="ticker-item">{line}</span>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function LandingPage({ onGetStarted, onTryDemo }) {
+  return (
+    <div className="app landing">
+      <header className="landing-hero">
+        <h1>Accountabuddy</h1>
+        <p className="landing-tagline">your friends won't let you quit.</p>
+        <p className="landing-sub">
+          Set goals. Check in daily. Skip a day? Your friends vote on your excuse.
+          They call cap? They pick your punishment. No mercy.
+        </p>
+        <button className="save-btn landing-cta" onClick={onGetStarted}>
+          Start locking in
+        </button>
+        <button className="landing-try-btn" onClick={onTryDemo}>
+          try it first — no signup needed
+        </button>
+      </header>
+
+      <Ticker />
+
+      <section className="card landing-step">
+        <span className="landing-step-num">01</span>
+        <h2>Set your goals</h2>
+        <p>What are you actually working toward? Put it on record. Daily check-ins keep you honest.</p>
+      </section>
+
+      <section className="card landing-step">
+        <span className="landing-step-num">02</span>
+        <h2>Bring your people</h2>
+        <p>Add friends who won't go easy on you. They get notified every time you slip up.</p>
+      </section>
+
+      <section className="card landing-step">
+        <span className="landing-step-num">03</span>
+        <h2>Face the verdict</h2>
+        <p>Missed a day? Write your excuse — your friends vote on it. Rejected? They choose your punishment.</p>
+      </section>
+
+      <section className="card landing-step">
+        <span className="landing-step-num">04</span>
+        <h2>Build real streaks</h2>
+        <p>Watch your consistency grow. Mood tracking, stats, proof uploads — receipts for your progress.</p>
+      </section>
+
+      <Ticker />
+
+      <div className="landing-bottom">
+        <p className="landing-bottom-text">stop watching motivation reels. build a system.</p>
+        <button className="save-btn landing-cta" onClick={onGetStarted}>
+          Create your account
+        </button>
+        <button className="landing-signin-link" onClick={() => onGetStarted('login')}>
+          Already have an account? Sign in
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function LoginPage({ initialMode = 'signup' }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [toast, setToast] = useState(null)
-  const [mode, setMode] = useState('login')
+  const [mode, setMode] = useState(initialMode)
   const [sliding, setSliding] = useState(false)
   const [slideDir, setSlideDir] = useState('right')
 
@@ -309,6 +397,186 @@ function LoginPage() {
   )
 }
 
+const DEMO_MOOD_LABELS = ['Burnt out', 'Low', 'Okay', 'Focused', 'Locked in']
+
+function DemoApp({ onSignup }) {
+  const [goals, setGoals] = useState([
+    { id: 1, title: 'Ship portfolio site', completed: false },
+    { id: 2, title: 'Leetcode daily', completed: false },
+    { id: 3, title: 'Read 30 min', completed: false },
+  ])
+  const [mood, setMood] = useState(0)
+  const [learned, setLearned] = useState('')
+  const [built, setBuilt] = useState('')
+  const [showPrompt, setShowPrompt] = useState(false)
+  const [promptMsg, setPromptMsg] = useState('')
+
+  function trap(msg) {
+    setPromptMsg(msg || 'Sign up to keep your progress')
+    setShowPrompt(true)
+  }
+
+  function toggleGoal(id) {
+    setGoals(prev => {
+      const next = prev.map(g => g.id === id ? { ...g, completed: !g.completed } : g)
+      // confetti when all goals completed
+      if (next.every(g => g.completed)) {
+        import('canvas-confetti').then(({ default: confetti }) => {
+          confetti({ particleCount: 80, spread: 60, origin: { y: 0.7 } })
+        })
+      }
+      return next
+    })
+  }
+
+  const completedCount = goals.filter(g => g.completed).length
+  const today = new Date()
+  const dateDisplay = today.toLocaleDateString('en-US', {
+    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
+  })
+
+  // Stable mock 30-day dots (seeded by day index, not random)
+  const dots = Array.from({ length: 30 }, (_, i) => {
+    const seed = (i * 7 + 3) % 10
+    const status = i >= 28 ? 'future' : seed > 2 ? 'completed' : seed > 0 ? 'partial' : 'missed'
+    const moodLevel = status === 'completed' ? (seed % 3) + 3 : 0
+    return { date: i, status, moodLevel }
+  })
+
+  return (
+    <div className="app">
+      {showPrompt && (
+        <div className="demo-prompt-overlay" onClick={() => setShowPrompt(false)}>
+          <div className="demo-prompt" onClick={e => e.stopPropagation()}>
+            <p className="demo-prompt-text">{promptMsg}</p>
+            <button className="save-btn" onClick={onSignup}>Start locking in</button>
+            <button className="demo-prompt-dismiss" onClick={() => setShowPrompt(false)}>keep exploring</button>
+          </div>
+        </div>
+      )}
+
+      <div className="demo-banner" onClick={onSignup}>
+        you're in try mode — <span className="demo-banner-link">sign up to keep your progress</span>
+      </div>
+
+      <header>
+        <h1>Accountabuddy</h1>
+        <p className="date">{dateDisplay}</p>
+        <p className="streak">12 day streak</p>
+      </header>
+
+      <section className="card card-accent-cheer">
+        <h2>From your people</h2>
+        <div className="cheer-list">
+          <div className="cheer-item">
+            <p className="cheer-message">"bro you're actually locked in this week 🔥"</p>
+            <span className="cheer-sender">— alex</span>
+          </div>
+        </div>
+      </section>
+
+      <section className="card card-accent-green">
+        <h2>Goals <span className="card-header-count">{completedCount}/{goals.length}</span></h2>
+        <div className="blocks">
+          {goals.map(goal => (
+            <div key={goal.id} className="goal-block">
+              <label className={`block ${goal.completed ? 'done' : ''}`}>
+                <input type="checkbox" checked={goal.completed} onChange={() => toggleGoal(goal.id)} />
+                <span className="checkmark" />
+                <span className="block-name">{goal.title}</span>
+              </label>
+              {goal.completed && (
+                <div className="goal-proof">
+                  <input type="url" className="field-input goal-proof-input"
+                    placeholder="proof or it didn't happen..."
+                    onFocus={() => trap('Sign up to submit proof for your goals')} readOnly />
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="card card-accent-purple">
+        <h2>Mood {mood > 0 && <span className="card-header-val">{DEMO_MOOD_LABELS[mood - 1]}</span>}</h2>
+        <div className="mood-scale">
+          {DEMO_MOOD_LABELS.map((label, i) => {
+            const level = i + 1
+            return (
+              <button key={level} className={`mood-btn ${mood === level ? 'active' : ''}`}
+                onClick={() => setMood(level)} title={label}>
+                <span className="mood-num">{level}</span>
+                <span className="mood-label">{label}</span>
+              </button>
+            )
+          })}
+        </div>
+      </section>
+
+      <section className="card">
+        <h2>Today's W</h2>
+        <textarea className="field-textarea"
+          placeholder="what did you learn today? (50 chars min)"
+          value={learned} onChange={e => setLearned(e.target.value)} rows={3} />
+        <p className={`char-count ${learned.trim().length >= 50 ? 'met' : ''}`}>{learned.trim().length}/50</p>
+      </section>
+
+      <section className="card">
+        <h2>What I shipped</h2>
+        <textarea className="field-textarea" placeholder="what did you build or work on today..."
+          value={built} onChange={e => setBuilt(e.target.value)} rows={3} />
+      </section>
+
+      <section className="card">
+        <h2>Last 30 Days</h2>
+        <div className="dot-grid">
+          {dots.map(d => (
+            <div key={d.date}
+              className={`dot ${d.status === 'completed' ? (d.moodLevel >= 4 ? 'dot-mood-high' : d.moodLevel === 3 ? 'dot-mood-mid' : 'dot-mood-low') : `dot-${d.status}`}`} />
+          ))}
+        </div>
+        <div className="dot-legend">
+          <span><span className="dot dot-mood-high dot-inline" /> Good</span>
+          <span><span className="dot dot-mood-mid dot-inline" /> Okay</span>
+          <span><span className="dot dot-mood-low dot-inline" /> Low</span>
+          <span><span className="dot dot-partial dot-inline" /> Partial</span>
+          <span><span className="dot dot-missed dot-inline" /> Missed</span>
+        </div>
+      </section>
+
+      <div className="landing-bottom">
+        <button className="save-btn landing-cta" onClick={onSignup}>
+          ready? start locking in
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function LandingOrLogin() {
+  // 'landing' | 'demo' | 'auth'
+  const [view, setView] = useState('landing')
+  const [initialMode, setInitialMode] = useState('signup')
+
+  function handleGetStarted(mode) {
+    setInitialMode(mode || 'signup')
+    setView('auth')
+  }
+
+  function handleTryDemo() {
+    setView('demo')
+  }
+
+  function handleDemoSignup() {
+    setInitialMode('signup')
+    setView('auth')
+  }
+
+  if (view === 'demo') return <DemoApp onSignup={handleDemoSignup} />
+  if (view === 'auth') return <LoginPage initialMode={initialMode} />
+  return <LandingPage onGetStarted={handleGetStarted} onTryDemo={handleTryDemo} />
+}
+
 function TabNav({ tab, setTab }) {
   return (
     <nav className="tab-nav">
@@ -475,7 +743,7 @@ function Main() {
     )
   }
 
-  if (!session) return <LoginPage />
+  if (!session) return <LandingOrLogin />
 
   if (recoveryMode) return <ResetPasswordPage />
 

@@ -1060,6 +1060,10 @@ function App({ userId }) {
     if (!doneForToday || postSubmitUiApplied) return
     setCollapsed(prev => ({ ...prev, goals: true, mood: true, learned: true, built: true }))
     setPostSubmitUiApplied(true)
+    // Celebration confetti
+    import('canvas-confetti').then(({ default: confetti }) => {
+      confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } })
+    }).catch(() => {})
   }, [doneForToday, postSubmitUiApplied])
 
   useEffect(() => {
