@@ -207,8 +207,8 @@ function SettingsPage({ userId, onSetupComplete, onSkip, onLogout, theme = 'dark
   }
 
   async function removePartner(id) {
-    if (partners.length <= 3) {
-      setError('At least 3 accountability partners are required.')
+    if (partners.length <= 1) {
+      setError('At least 1 accountability partner is required.')
       return
     }
     await supabase.from('accountability_partners').delete().eq('id', id)
@@ -246,7 +246,7 @@ function SettingsPage({ userId, onSetupComplete, onSkip, onLogout, theme = 'dark
     setNotifPermission(result)
   }
 
-  const isSetupDone = goals.length >= 1 && partners.length >= 3
+  const isSetupDone = goals.length >= 1 && partners.length >= 1
 
   if (loading) {
     return (
@@ -264,7 +264,7 @@ function SettingsPage({ userId, onSetupComplete, onSkip, onLogout, theme = 'dark
         <h1>Settings</h1>
         <p className="date">Set up your goals and accountability partners</p>
         <p className="streak-quality">
-          {isSetupDone ? 'Setup complete' : `Setup in progress: ${Math.min(goals.length, 1)}/1 goal, ${partners.length}/3 partners`}
+          {isSetupDone ? 'Setup complete' : `Setup in progress: ${Math.min(goals.length, 1)}/1 goal, ${partners.length}/1 partner`}
         </p>
       </header>
 
@@ -387,7 +387,7 @@ function SettingsPage({ userId, onSetupComplete, onSkip, onLogout, theme = 'dark
       <section className="card">
         <h2>Accountability Partners ({partners.length})</h2>
         <p className="subtitle">
-          People who will vote on your excuses. Minimum 3 required.
+          People who will vote on your excuses. Minimum 1 required.
         </p>
 
         <div className="settings-list">
@@ -397,8 +397,8 @@ function SettingsPage({ userId, onSetupComplete, onSkip, onLogout, theme = 'dark
               <button
                 className="settings-remove"
                 onClick={() => removePartner(p.id)}
-                disabled={partners.length <= 3}
-                title={partners.length <= 3 ? 'Need at least 3 partners' : 'Remove partner'}
+                disabled={partners.length <= 1}
+                title={partners.length <= 1 ? 'Need at least 1 partner' : 'Remove partner'}
               >
                 x
               </button>
@@ -637,7 +637,7 @@ function SettingsPage({ userId, onSetupComplete, onSkip, onLogout, theme = 'dark
             disabled={!isSetupDone}
             onClick={onSetupComplete}
           >
-            {isSetupDone ? 'Continue to Check-in' : `Need ${goals.length < 1 ? 'at least 1 goal' : ''}${goals.length < 1 && partners.length < 3 ? ' and ' : ''}${partners.length < 3 ? `${3 - partners.length} more partner${3 - partners.length > 1 ? 's' : ''}` : ''}`}
+            {isSetupDone ? 'Continue to Check-in' : `Need ${goals.length < 1 ? 'at least 1 goal' : ''}${goals.length < 1 && partners.length < 1 ? ' and ' : ''}${partners.length < 1 ? '1 partner' : ''}`}
           </button>
           {onSkip && !isSetupDone && (
             <button className="history-toggle" onClick={onSkip} style={{ marginTop: '0.5rem' }}>

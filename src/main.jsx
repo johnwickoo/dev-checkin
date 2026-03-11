@@ -688,10 +688,10 @@ function Main() {
   async function checkSetup(userId) {
     const [goalsRes, partnersRes] = await Promise.all([
       supabase.from('goals').select('id').eq('user_id', userId).limit(1),
-      supabase.from('accountability_partners').select('id').eq('user_id', userId).limit(3),
+      supabase.from('accountability_partners').select('id').eq('user_id', userId).limit(1),
     ])
     const hasGoals = (goalsRes.data || []).length >= 1
-    const hasPartners = (partnersRes.data || []).length >= 3
+    const hasPartners = (partnersRes.data || []).length >= 1
     setSetupDone(hasGoals && hasPartners)
   }
 

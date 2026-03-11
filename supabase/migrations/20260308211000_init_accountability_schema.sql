@@ -404,8 +404,8 @@ begin
     from accountability_partners
     where user_id = old.user_id;
 
-    if current_count <= 3 then
-      raise exception 'At least 3 accountability partners are required';
+    if current_count <= 1 then
+      raise exception 'At least 1 accountability partner is required';
     end if;
   end if;
 
@@ -1077,8 +1077,8 @@ declare
 begin
   if current_user <> 'postgres' then
     select count(*) into current_count from accountability_partners where user_id = old.user_id;
-    if current_count <= 3 then
-      raise exception 'At least 3 accountability partners are required';
+    if current_count <= 1 then
+      raise exception 'At least 1 accountability partner is required';
     end if;
   end if;
   return old;
