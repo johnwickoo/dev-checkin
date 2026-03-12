@@ -1333,13 +1333,16 @@ function App({ userId, active }) {
         emails: partners.map(p => p.email),
       })
 
+      const { data: { user: currentUser } } = await supabase.auth.getUser()
+      const fromName = currentUser?.email?.split('@')[0] || 'Accountabuddy user'
+
       const messages = partners.map(p => {
         const token = tokenByEmail[String(p.email || '').trim().toLowerCase()]
         if (!token) return null
         const base = `${VOTE_BASE_URL}?token=${encodeURIComponent(token)}`
         return {
           to_email: p.email,
-          from_name: session?.user?.email?.split('@')[0] || 'Accountabuddy user',
+          from_name: fromName,
           missed_date: formatDate(missedDate),
           excuse: activeExcuse,
           excuse_text: activeExcuse,
@@ -1489,13 +1492,16 @@ function App({ userId, active }) {
         emails: partners.map(p => p.email),
       })
 
+      const { data: { user: currentUser2 } } = await supabase.auth.getUser()
+      const fromName2 = currentUser2?.email?.split('@')[0] || 'Accountabuddy user'
+
       const messages = partners.map(p => {
         const token = tokenByEmail[String(p.email || '').trim().toLowerCase()]
         if (!token) return null
         const base = `${VOTE_BASE_URL}?token=${encodeURIComponent(token)}`
         return {
           to_email: p.email,
-          from_name: session?.user?.email?.split('@')[0] || 'Accountabuddy user',
+          from_name: fromName2,
           missed_date: formatDate(deadlineIssue.deadline),
           excuse: excuseText,
           excuse_text: excuseText,
