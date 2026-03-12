@@ -1332,8 +1332,11 @@ function App({ userId }) {
         const base = `${VOTE_BASE_URL}?token=${encodeURIComponent(token)}`
         return {
           to_email: p.email,
+          from_name: session?.user?.email?.split('@')[0] || 'Accountabuddy user',
           missed_date: formatDate(missedDate),
+          excuse: activeExcuse,
           excuse_text: activeExcuse,
+          vote_url: base,
           was_avoidable: activeAvoidable ? 'Yes' : 'No',
           streak: streakBefore,
           accept_url: base + '&vote=accept',
@@ -1485,8 +1488,11 @@ function App({ userId }) {
         const base = `${VOTE_BASE_URL}?token=${encodeURIComponent(token)}`
         return {
           to_email: p.email,
+          from_name: session?.user?.email?.split('@')[0] || 'Accountabuddy user',
           missed_date: formatDate(deadlineIssue.deadline),
+          excuse: excuseText,
           excuse_text: excuseText,
+          vote_url: base,
           was_avoidable: activeAvoidable ? 'Yes' : 'No',
           streak: streakBefore,
           accept_url: base + '&vote=accept',
