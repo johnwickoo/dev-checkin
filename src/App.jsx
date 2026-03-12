@@ -297,7 +297,7 @@ function ProgressRing({ percent, size = 24, stroke = 2.5 }) {
   )
 }
 
-function App({ userId }) {
+function App({ userId, active }) {
   const today = getToday()
   const fileInputRef = useRef(null)
   const autoSaveTimer = useRef(null)
@@ -462,6 +462,13 @@ function App({ userId }) {
 
   // ── Load everything ───────────────────────────────────────
   useEffect(() => { loadAll() }, [])
+
+  // Reload when switching back to checkin tab (e.g. after adding a goal in Settings)
+  const hasLoadedOnce = useRef(false)
+  useEffect(() => {
+    if (!hasLoadedOnce.current) { hasLoadedOnce.current = true; return }
+    if (active) loadAll()
+  }, [active])
 
   async function loadAll() {
     setLoading(true)

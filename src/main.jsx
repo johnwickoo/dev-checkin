@@ -776,7 +776,7 @@ function Main() {
       <Suspense fallback={<LoadingFallback />}>
         {visitedTabs.checkin && (
           <div className={`tab-panel ${tab === 'checkin' ? 'tab-panel-active' : 'tab-panel-hidden'}`}>
-            <App userId={userId} />
+            <App userId={userId} active={tab === 'checkin'} />
           </div>
         )}
         {visitedTabs.stats && (
