@@ -73,6 +73,9 @@ function SettingsPage({ userId, onSetupComplete, onSkip, onLogout, theme = 'dark
   const [showNotifications, setShowNotifications] = useState(false)
   const [autoSaveEnabled, setAutoSaveEnabled] = useState(() => localStorage.getItem('accountabuddy_autosave') === 'true')
 
+  // Cheer link gate
+  const [cheerUnlocked, setCheerUnlocked] = useState(false)
+
   // Rest days
   const [restDays, setRestDays] = useState([])
 
@@ -110,6 +113,11 @@ function SettingsPage({ userId, onSetupComplete, onSkip, onLogout, theme = 'dark
       setReminderHour(hour)
     }
     setAutoSaveEnabled(localStorage.getItem('accountabuddy_autosave') === 'true')
+
+    // Check cheer link eligibility
+    const { data: statsData } = await supabase.rpc('get_public_user_stats', { p_user_id: userId })
+    const stats = Array.isArray(statsData) ? statsData[0] : statsData
+    setCheerUnlocked(stats && (stats.current_streak >= 7 || stats.has_completed_goal))
 
     setLoading(false)
   }
@@ -515,31 +523,38 @@ function SettingsPage({ userId, onSetupComplete, onSkip, onLogout, theme = 'dark
         </p>
       </section>
 
-      <section className="card card-accent-green">
+      <section className={`card ${cheerUnlocked ? 'card-accent-green' : ''}`}>
         <h2>Encouragement Link</h2>
-        <p className="subtitle">
-          Share this with friends so they can send you encouragement. Auto-included in accountability emails.
-          Unlocks for friends after a 7-day streak or completing a goal.
-        </p>
-        <div className="settings-add">
-          <input
-            type="text"
-            className="field-input"
-            readOnly
-            value={`${window.location.origin}/cheer?for=${userId}`}
-            onFocus={e => e.target.select()}
-          />
-          <button
-            className="save-btn settings-add-btn"
-            onClick={() => {
-              navigator.clipboard.writeText(`${window.location.origin}/cheer?for=${userId}`)
-              setError('Link copied!')
-              setTimeout(() => setError(''), 2000)
-            }}
-          >
-            Copy Link
-          </button>
-        </div>
+        {cheerUnlocked ? (
+          <>
+            <p className="subtitle">
+              Share this with friends so they can send you encouragement. Auto-included in accountability emails.
+            </p>
+            <div className="settings-add">
+              <input
+                type="text"
+                className="field-input"
+                readOnly
+                value={`${window.location.origin}/cheer?for=${userId}`}
+                onFocus={e => e.target.select()}
+              />
+              <button
+                className="save-btn settings-add-btn"
+                onClick={() => {
+                  navigator.clipboard.writeText(`${window.location.origin}/cheer?for=${userId}`)
+                  setError('Link copied!')
+                  setTimeout(() => setError(''), 2000)
+                }}
+              >
+                Copy Link
+              </button>
+            </div>
+          </>
+        ) : (
+          <p className="subtitle">
+            Unlocks after a <strong>7-day streak</strong> or <strong>completing a goal</strong>. Keep checking in!
+          </p>
+        )}
       </section>
 
       <section className="card card-accent-red">
