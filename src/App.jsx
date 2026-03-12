@@ -75,7 +75,8 @@ function getMajorityVoteThreshold(partnerCount) {
 }
 
 function formatPunishmentChoice(choice) {
-  return PUNISHMENT_LABELS[choice] || PUNISHMENT_LABELS.deep_work_2h
+  if (!choice) return 'Punishment assigned'
+  return PUNISHMENT_LABELS[choice] || choice
 }
 
 function toIsoInHours(hours) {

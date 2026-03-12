@@ -1,18 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from './supabase.js'
 
-const REJECT_PUNISHMENT_OPTIONS = [
-  { value: 'deep_work_2h', label: '2h deep work block' },
-  { value: 'no_social_24h', label: 'No social media for 24h' },
-  { value: 'donate_20', label: 'Donate $20' },
-]
-
-const PUNISHMENT_LABELS = {
-  deep_work_2h: '2h deep work block',
-  no_social_24h: 'No social media for 24h',
-  donate_20: 'Donate $20',
-}
-
 function VotePage() {
   const params = new URLSearchParams(window.location.search || window.location.hash.replace('#/vote', '').replace('?', ''))
   const voteToken = params.get('token') || ''
@@ -22,10 +10,11 @@ function VotePage() {
   const [submitting, setSubmitting] = useState(false)
   const [existingVote, setExistingVote] = useState(null)
   const [selectedPunishment, setSelectedPunishment] = useState(null)
-  const [rejectPunishment, setRejectPunishment] = useState(REJECT_PUNISHMENT_OPTIONS[0].value)
+  const [customPunishment, setCustomPunishment] = useState('')
   const [missedDate, setMissedDate] = useState('')
   const [excuseText, setExcuseText] = useState('')
   const [autoVoteDone, setAutoVoteDone] = useState(false)
+  const [showRejectForm, setShowRejectForm] = useState(false)
 
   async function loadVoteContext() {
     const { data, error } = await supabase
@@ -104,16 +93,25 @@ function VotePage() {
     loadVoteContext()
   }, [voteToken])
 
+  // Auto-vote accept from email link, but reject needs custom punishment
   useEffect(() => {
     if (autoVoteDone) return
     if (status !== 'ready') return
-    if (requestedVote !== 'accept' && requestedVote !== 'reject') return
-    setAutoVoteDone(true)
-    const votePayload = requestedVote === 'reject'
-      ? `reject:${rejectPunishment}`
-      : requestedVote
-    castVote(votePayload)
-  }, [autoVoteDone, status, requestedVote, rejectPunishment])
+    if (requestedVote === 'accept') {
+      setAutoVoteDone(true)
+      castVote('accept')
+    } else if (requestedVote === 'reject') {
+      setAutoVoteDone(true)
+      setShowRejectForm(true)
+    }
+  }, [autoVoteDone, status, requestedVote])
+
+  function handleRejectSubmit(e) {
+    e.preventDefault()
+    const punishment = customPunishment.trim()
+    if (!punishment || punishment.length < 3) return
+    castVote(`reject:${punishment}`)
+  }
 
   return (
     <div className="app">
@@ -153,38 +151,66 @@ function VotePage() {
         </section>
       )}
 
-      {status === 'ready' && (
+      {status === 'ready' && !showRejectForm && (
         <section className="card">
           <h2>Cast Your Vote</h2>
           <p className="vote-prompt">Is this excuse acceptable?</p>
-          <div className="vote-punishment">
-            <p className="vote-prompt">If rejecting, pick punishment:</p>
-            <select
-              className="field-input"
-              value={rejectPunishment}
-              onChange={e => setRejectPunishment(e.target.value)}
-            >
-              {REJECT_PUNISHMENT_OPTIONS.map(option => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-            </select>
-          </div>
           <div className="vote-buttons">
             <button
               className="vote-btn vote-accept"
               onClick={() => castVote('accept')}
               disabled={submitting}
             >
-              {submitting ? '...' : 'Accept'}
+              {submitting ? '...' : 'Accept — fair enough'}
             </button>
             <button
               className="vote-btn vote-reject"
-              onClick={() => castVote(`reject:${rejectPunishment}`)}
+              onClick={() => setShowRejectForm(true)}
               disabled={submitting}
             >
-              {submitting ? '...' : 'Reject'}
+              Reject — nice try
             </button>
           </div>
+        </section>
+      )}
+
+      {status === 'ready' && showRejectForm && (
+        <section className="card card-accent-red">
+          <h2>Assign a Punishment</h2>
+          <p className="vote-prompt">
+            What should they have to do today? Be creative but fair.
+          </p>
+          <form onSubmit={handleRejectSubmit}>
+            <input
+              type="text"
+              className="field-input"
+              placeholder="e.g., 50 push-ups and post a video"
+              value={customPunishment}
+              onChange={e => setCustomPunishment(e.target.value)}
+              maxLength={200}
+              minLength={3}
+              autoFocus
+              required
+            />
+            <div className="punish-char-count">{customPunishment.length}/200</div>
+            <div className="vote-buttons" style={{ marginTop: '0.75rem' }}>
+              <button
+                type="button"
+                className="vote-btn vote-accept"
+                onClick={() => setShowRejectForm(false)}
+                disabled={submitting}
+              >
+                Back
+              </button>
+              <button
+                type="submit"
+                className="vote-btn vote-reject"
+                disabled={submitting || customPunishment.trim().length < 3}
+              >
+                {submitting ? '...' : 'Reject + Assign'}
+              </button>
+            </div>
+          </form>
         </section>
       )}
 
@@ -201,7 +227,7 @@ function VotePage() {
           )}
           {existingVote === 'reject' && selectedPunishment && (
             <p className="vote-sub">
-              Selected punishment: <strong>{PUNISHMENT_LABELS[selectedPunishment] || selectedPunishment}</strong>
+              Assigned punishment: <strong>{selectedPunishment}</strong>
             </p>
           )}
         </section>
